@@ -178,3 +178,18 @@ export function movesFrom(game: GameState, from: number): number[] {
   }
   return legal;
 }
+// ---------- 게임 끝 판정 ----------
+
+export type Status = 'playing' | 'checkmate' | 'stalemate';
+
+export function gameStatus(game: GameState): Status {
+  // 지금 둘 차례인 쪽 기물 중 하나라도 둘 수 있는 수가 있으면 계속
+  for (let i = 0; i < 64; i++) {
+    const p = game.board[i];
+    if (p && p.color === game.turn && movesFrom(game, i).length > 0) {
+      return 'playing';
+    }
+  }
+  // 둘 수 있는 수가 0개
+  return inCheck(game, game.turn) ? 'checkmate' : 'stalemate';
+}

@@ -1,6 +1,6 @@
 import './style.css';
 import { initialGame, sq, type GameState } from './board';
-import { movesFrom, inCheck } from './moves';
+import { movesFrom, inCheck, gameStatus } from './moves';
 
 const SYMBOLS: Record<string, string> = {
   wk: '♔', wq: '♕', wr: '♖', wb: '♗', wn: '♘', wp: '♙',
@@ -11,15 +11,25 @@ const game: GameState = initialGame();
 let selected: number | null = null;
 let targets: number[] = [];
 
+function statusText(): string {
+  const status = gameStatus(game);
+  const side = game.turn === 'w' ? '백' : '흑';
+  const other = game.turn === 'w' ? '흑' : '백';
+
+  if (status === 'checkmate') return `체크메이트! ${other} 승리`;
+  if (status === 'stalemate') return '스테일메이트 — 무승부';
+  return `${side} 차례` + (inCheck(game, game.turn) ? ' — 체크!' : '');
+}
+
 function render() {
   const app = document.querySelector<HTMLDivElement>('#app')!;
   app.innerHTML = '';
 
-  const checked = inCheck(game, game.turn); // 지금 둘 차례인 쪽이 체크인지
+  const checked = inCheck(game, game.turn);
 
   const info = document.createElement('div');
   info.className = 'info';
-  info.textContent = (game.turn === 'w' ? '백 차례' : '흑 차례') + (checked ? ' — 체크!' : '');
+  info.textContent = statusText();
   app.appendChild(info);
 
   const boardEl = document.createElement('div');
@@ -47,6 +57,17 @@ function render() {
     }
   }
   app.appendChild(boardEl);
+
+  // 다시 시작 버튼
+  const restart = document.createElement('button');
+  restart.className = 'restart';
+  restart.textContent = '다시 시작';
+  restart.addEventListener('click', () => {
+    Object.assign(game, initialGame()); // 게임 상태를 처음으로 덮어쓰기
+    select(null);
+    render();
+  });
+  app.appendChild(restart);
 }
 
 function select(index: number | null) {
@@ -55,6 +76,8 @@ function select(index: number | null) {
 }
 
 function onSquareClick(index: number) {
+  if (gameStatus(game) !== 'playing') return; // 게임이 끝났으면 클릭 무시
+
   const piece = game.board[index];
 
   if (selected === null) {
