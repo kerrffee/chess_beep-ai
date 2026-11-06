@@ -204,6 +204,10 @@ export function makeMove(game: GameState, move: Move): void {
   const { from, to } = move;
   const piece = game.board[from]!;
 
+    // 50수 규칙 시계: 폰을 움직이거나 잡으면 0, 아니면 +1
+  const isCapture = game.board[to] !== null || (piece.type === 'p' && to === game.enPassant);
+  game.halfmoveClock = piece.type === 'p' || isCapture ? 0 : game.halfmoveClock + 1;
+  
   // 앙파상 잡기
   if (piece.type === 'p' && to === game.enPassant) {
     game.board[sq(fileOf(to), rankOf(from))] = null;
@@ -293,9 +297,67 @@ export function movesFrom(game: GameState, from: number): number[] {
 
 // ---------- 게임 끝 판정 ----------
 
-export type Status = 'playing' | 'checkmate' | 'stalemate';
+// 같은 장면인지 비교하기 위한 "장면 이름표"
+// 기물 배치 + 차례 + 캐슬링 권리 + (실제로 잡을 수 있을 때만) 앙파상 칸
+export function positionKey(game: GameState): string {
+  let key = '';
+  for (let i = 0; i < 64; i++) {
+    const p = game.board[i];
+    key += p ? (p.color === 'w' ? p.type.toUpperCase() : p.type) : '.';
+  }
+  key += ' ' + game.turn + ' ';
+  const c = game.castling;
+  key += (c.wK ? 'K' : '') + (c.wQ ? 'Q' : '') + (c.bK ? 'k' : '') + (c.bQ ? 'q' : '');
 
-export function gameStatus(game: GameState): Status {
-  if (legalMoves(game).length > 0) return 'playing';
-  return inCheck(game, game.turn) ? 'checkmate' : 'stalemate';
+  // 앙파상 칸은 옆에 잡을 수 있는 폰이 있을 때만 장면 차이로 침
+  if (game.enPassant !== null) {
+    const ep = game.enPassant;
+    const pawnRank = game.turn === 'w' ? rankOf(ep) - 1 : rankOf(ep) + 1;
+    for (const df of [-1, 1]) {
+      const f = fileOf(ep) + df;
+      if (!onBoard(f, pawnRank)) continue;
+      const p = game.board[sq(f, pawnRank)];
+      if (p && p.type === 'p' && p.color === game.turn) {
+        key += ' ' + ep;
+        break;
+      }
+    }
+  }
+  return key;
+}
+
+// 양쪽 다 체크메이트를 만들 수 없는 기물만 남았는지
+function insufficientMaterial(game: GameState): boolean {
+  const others: { type: string; square: number }[] = [];
+  for (let i = 0; i < 64; i++) {
+    const p = game.board[i];
+    if (p && p.type !== 'k') others.push({ type: p.type, square: i });
+  }
+
+  if (others.length === 0) return true;                          // 킹 vs 킹
+  if (others.length === 1 && (others[0].type === 'b' || others[0].type === 'n')) {
+    return true;                                                 // 킹+비숍 또는 킹+나이트 vs 킹
+  }
+  // 비숍만 남았고 전부 같은 색 칸 위에 있으면 메이트 불가
+  if (others.every(o => o.type === 'b')) {
+    const colorOf = (s: number) => (fileOf(s) + rankOf(s)) % 2;
+    return others.every(o => colorOf(o.square) === colorOf(others[0].square));
+  }
+  return false;
+}
+
+export type Status = 'playing' | 'checkmate' | 'stalemate' | 'fifty' | 'repetition' | 'material';
+
+// history: 지금까지 나온 장면 이름표들 (지금 장면 포함)
+export function gameStatus(game: GameState, history: string[] = []): Status {
+  if (legalMoves(game).length === 0) {
+    return inCheck(game, game.turn) ? 'checkmate' : 'stalemate';
+  }
+  if (game.halfmoveClock >= 100) return 'fifty';                 // 양쪽 합쳐 100번 = 50수
+
+  const key = positionKey(game);
+  if (history.filter(k => k === key).length >= 3) return 'repetition';
+
+  if (insufficientMaterial(game)) return 'material';
+  return 'playing';
 }

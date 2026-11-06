@@ -1,6 +1,6 @@
 import './style.css';
 import { initialGame, fromFEN, sq, type GameState, type PieceType } from './board';
-import { movesFrom, inCheck, gameStatus, makeMove, legalMoves } from './moves';
+import { movesFrom, inCheck, gameStatus, makeMove, legalMoves, positionKey, type Move } from './moves';
 
 const SYMBOLS: Record<string, string> = {
   wk: '♔', wq: '♕', wr: '♖', wb: '♗', wn: '♘', wp: '♙',
@@ -18,14 +18,25 @@ let selected: number | null = null;
 let targets: number[] = [];
 // 프로모션 고르는 중이면 그 수의 출발·도착 칸
 let pendingPromotion: { from: number; to: number } | null = null;
+// 지금까지 나온 장면들 (3회 반복 판정용)
+let history: string[] = [positionKey(game)];
+
+// 수를 두고 장면 기록까지 하는 함수. 화면에서는 이것만 씀
+function play(move: Move) {
+  makeMove(game, move);
+  history.push(positionKey(game));
+}
 
 function statusText(): string {
-  const status = gameStatus(game);
+  const status = gameStatus(game, history);
   const side = game.turn === 'w' ? '백' : '흑';
   const other = game.turn === 'w' ? '흑' : '백';
 
   if (status === 'checkmate') return `체크메이트! ${other} 승리`;
   if (status === 'stalemate') return '스테일메이트 — 무승부';
+  if (status === 'fifty') return '50수 동안 잡기·폰 이동 없음 — 무승부';
+  if (status === 'repetition') return '같은 장면 3회 반복 — 무승부';
+  if (status === 'material') return '메이트할 기물 부족 — 무승부';
   return `${side} 차례` + (inCheck(game, game.turn) ? ' — 체크!' : '');
 }
 
@@ -72,6 +83,7 @@ function render() {
   restart.textContent = '다시 시작';
   restart.addEventListener('click', () => {
     Object.assign(game, newGame()); // 게임 상태를 처음으로 덮어쓰기
+    history = [positionKey(game)];
     pendingPromotion = null;
     select(null);
     render();
@@ -101,7 +113,7 @@ function promotionPicker(move: { from: number; to: number }): HTMLElement {
     btn.className = 'promo-piece';
     btn.textContent = SYMBOLS[game.turn + type];
     btn.addEventListener('click', () => {
-      makeMove(game, { from: move.from, to: move.to, promotion: type });
+      play({ from: move.from, to: move.to, promotion: type });
       pendingPromotion = null;
       select(null);
       render();
@@ -134,7 +146,7 @@ function isPromotion(from: number, to: number): boolean {
 }
 
 function onSquareClick(index: number) {
-  if (gameStatus(game) !== 'playing') return; // 게임이 끝났으면 클릭 무시
+  if (gameStatus(game, history) !== 'playing') return; // 게임이 끝났으면 클릭 무시
   if (pendingPromotion) return;               // 고르는 중이면 판 클릭 무시
 
   const piece = game.board[index];
@@ -149,8 +161,7 @@ function onSquareClick(index: number) {
     if (isPromotion(selected, index)) {
       pendingPromotion = { from: selected, to: index }; // 창을 띄우고 고를 때까지 기다림
     } else {
-      makeMove(game, { from: selected, to: index });
-      select(null);
+      play({ from: selected, to: index });
     }
   } else {
     select(null);
