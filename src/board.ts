@@ -46,3 +46,54 @@ export function initialGame(): GameState {
     halfmoveClock: 0,
   };
 }
+
+// ---------- FEN 불러오기 ----------
+// 예: "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+// 공백으로 나눈 6칸: 배치 / 차례 / 캐슬링 / 앙파상 / 반수 시계 / 수 번호(우리는 안 씀)
+export function fromFEN(fen: string): GameState {
+  const [placement, turn = 'w', castling = '-', ep = '-', half = '0'] = fen.trim().split(/\s+/);
+
+  // ① 배치: FEN은 맨 위 줄(rank 7)부터 아래로 내려옴
+  const board: Board = new Array(64).fill(null);
+  const rows = placement.split('/');
+  if (rows.length !== 8) throw new Error(`FEN 줄이 8개가 아니에요: ${placement}`);
+
+  for (let i = 0; i < 8; i++) {
+    const rank = 7 - i;
+    let file = 0;
+
+    for (const ch of rows[i]) {
+      if (ch >= '1' && ch <= '8') {
+        file += Number(ch);              // 숫자 = 빈칸 개수
+      } else {
+        const type = ch.toLowerCase();
+        if (!'pnbrqk'.includes(type)) throw new Error(`모르는 기물 글자: ${ch}`);
+        const color: Color = ch === type ? 'b' : 'w';   // 소문자 = 흑, 대문자 = 백
+        board[sq(file, rank)] = { color, type: type as PieceType };
+        file++;
+      }
+    }
+    if (file !== 8) throw new Error(`${8 - i}번째 랭크 칸 수가 8이 아니에요: ${rows[i]}`);
+  }
+
+  // ④ 앙파상 칸: "e3" → 칸 번호
+  let enPassant: number | null = null;
+  if (ep !== '-') {
+    const f = ep.charCodeAt(0) - 'a'.charCodeAt(0);
+    const r = Number(ep[1]) - 1;
+    enPassant = sq(f, r);
+  }
+
+  return {
+    board,
+    turn: turn === 'b' ? 'b' : 'w',            // ② 차례
+    castling: {                                 // ③ 캐슬링 권리
+      wK: castling.includes('K'),
+      wQ: castling.includes('Q'),
+      bK: castling.includes('k'),
+      bQ: castling.includes('q'),
+    },
+    enPassant,
+    halfmoveClock: Number(half),                // ⑤ 반수 시계
+  };
+}
