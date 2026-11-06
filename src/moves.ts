@@ -71,7 +71,7 @@ function slideMoves(game: GameState, from: number, dirs: [number, number][]): nu
   return result;
 }
 
-// 폰 (기본 규칙만: 앞으로 1칸, 처음 2칸, 대각선 잡기)
+// 폰: 앞으로 1칸, 처음 2칸, 대각선 잡기, 앙파상
 function pawnMoves(game: GameState, from: number): number[] {
   const piece = game.board[from]!;
   const result: number[] = [];
@@ -94,9 +94,14 @@ function pawnMoves(game: GameState, from: number): number[] {
   for (const df of [-1, 1]) {
     const nf = f + df;
     if (!onBoard(nf, oneRank)) continue;
-    const target = game.board[sq(nf, oneRank)];
+
+    const diag = sq(nf, oneRank);
+    const target = game.board[diag];
+
     if (target && target.color !== piece.color) {
-      result.push(sq(nf, oneRank));
+      result.push(diag); // 일반 대각선 잡기
+    } else if (diag === game.enPassant) {
+      result.push(diag); // 앙파상
     }
   }
 
@@ -160,8 +165,21 @@ export function inCheck(game: GameState, color: 'w' | 'b'): boolean {
 export function makeMove(game: GameState, from: number, to: number): void {
   const piece = game.board[from]!;
 
+  // 앙파상 잡기: 폰이 앙파상 칸으로 가면, 그 뒤에 있는 상대 폰을 없앤다
+  if (piece.type === 'p' && to === game.enPassant) {
+    const capturedPawn = sq(fileOf(to), rankOf(from)); // 도착 칸과 같은 열, 출발 칸과 같은 줄
+    game.board[capturedPawn] = null;
+  }
+
   game.board[to] = piece;
   game.board[from] = null;
+
+  // 앙파상 칸 기록: 폰이 두 칸 전진했으면 건너뛴 칸을, 아니면 지움
+  if (piece.type === 'p' && Math.abs(rankOf(to) - rankOf(from)) === 2) {
+    game.enPassant = sq(fileOf(from), (rankOf(from) + rankOf(to)) / 2);
+  } else {
+    game.enPassant = null;
+  }
 
   // 프로모션: 폰이 상대 끝 줄에 도착하면 퀸으로 (고르기 기능은 나중에)
   const lastRank = piece.color === 'w' ? 7 : 0;
