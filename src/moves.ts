@@ -58,16 +58,51 @@ function slideMoves(game: GameState, from: number, dirs: [number, number][]): nu
       const target = game.board[to];
 
       if (!target) {
-        result.push(to);            // 빈 칸: 추가하고 계속
+        result.push(to);
       } else {
-        if (target.color !== piece.color) result.push(to); // 상대 기물: 잡을 수 있음
-        break;                      // 기물이 있으면 어쨌든 여기서 멈춤
+        if (target.color !== piece.color) result.push(to);
+        break;
       }
 
       nf += df;
       nr += dr;
     }
   }
+  return result;
+}
+
+// 폰 (기본 규칙만: 앞으로 1칸, 처음 2칸, 대각선 잡기)
+function pawnMoves(game: GameState, from: number): number[] {
+  const piece = game.board[from]!;
+  const result: number[] = [];
+  const f = fileOf(from);
+  const r = rankOf(from);
+
+  const dir = piece.color === 'w' ? 1 : -1;       // 앞 방향: 백은 위(+1), 흑은 아래(-1)
+  const startRank = piece.color === 'w' ? 1 : 6;  // 출발 줄: 백은 2랭크, 흑은 7랭크
+
+  // 1. 앞으로 한 칸
+  const oneRank = r + dir;
+  if (onBoard(f, oneRank) && !game.board[sq(f, oneRank)]) {
+    result.push(sq(f, oneRank));
+
+    // 2. 출발 줄이면 두 칸 (한 칸 앞이 비어 있을 때만 여기까지 옴)
+    const twoRank = r + 2 * dir;
+    if (r === startRank && !game.board[sq(f, twoRank)]) {
+      result.push(sq(f, twoRank));
+    }
+  }
+
+  // 3. 대각선 잡기 (왼쪽, 오른쪽)
+  for (const df of [-1, 1]) {
+    const nf = f + df;
+    if (!onBoard(nf, oneRank)) continue;
+    const target = game.board[sq(nf, oneRank)];
+    if (target && target.color !== piece.color) {
+      result.push(sq(nf, oneRank));
+    }
+  }
+
   return result;
 }
 
@@ -87,14 +122,8 @@ export function movesFrom(game: GameState, from: number): number[] {
       return slideMoves(game, from, BISHOP_DIRS);
     case 'q':
       return slideMoves(game, from, QUEEN_DIRS);
-    default: {
-      // 아직 규칙 없음(폰): 내 기물이 없는 칸이면 어디든
-      const all: number[] = [];
-      for (let i = 0; i < 64; i++) {
-        const t = game.board[i];
-        if (!t || t.color !== piece.color) all.push(i);
-      }
-      return all;
-    }
+    case 'p':
+      return pawnMoves(game, from);
   }
+  return [];
 }
