@@ -108,3 +108,17 @@ body {
   cursor: pointer;
 }
 .promo-piece:hover { background: #f6f669; }
+
+/* 마지막으로 둔 수 표시 */
+.light.last:not(.selected):not(.check) { background: #cdd26a; }
+.dark.last:not(.selected):not(.check)  { background: #aaa23a; }
+
+/* 상대 고르기 */
+.opponent {
+  padding: 6px 10px;
+  font-size: 16px;
+  border-radius: 6px;
+  background: #444;
+  color: #eee;
+  border: 1px solid #666;
+}
