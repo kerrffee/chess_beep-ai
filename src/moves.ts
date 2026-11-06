@@ -108,7 +108,7 @@ function pawnMoves(game: GameState, from: number): number[] {
   return result;
 }
 
-// 체크를 따지지 않은 "일단 갈 수 있는 칸"
+// 체크를 따지지 않은 "일단 갈 수 있는 칸" (캐슬링은 여기 넣지 않음: 함정 ②)
 function pseudoMoves(game: GameState, from: number): number[] {
   const piece = game.board[from];
   if (!piece) return [];
@@ -141,11 +141,21 @@ function findKing(game: GameState, color: 'w' | 'b'): number {
   return -1;
 }
 
-// target 칸을 attacker 색 기물 중 하나라도 공격하고 있는지
+// target 칸을 attacker 색 기물 중 하나라도 공격하고 있는지 (빈 칸도 가능)
 function isAttacked(game: GameState, target: number, attacker: 'w' | 'b'): boolean {
   for (let i = 0; i < 64; i++) {
     const p = game.board[i];
-    if (p && p.color === attacker && pseudoMoves(game, i).includes(target)) {
+    if (!p || p.color !== attacker) continue;
+
+    if (p.type === 'p') {
+      // 함정 ①: 폰은 앞쪽 대각선 두 칸을 "항상" 공격하고 있다고 본다
+      const dir = p.color === 'w' ? 1 : -1;
+      const r = rankOf(i) + dir;
+      for (const df of [-1, 1]) {
+        const f = fileOf(i) + df;
+        if (onBoard(f, r) && sq(f, r) === target) return true;
+      }
+    } else if (pseudoMoves(game, i).includes(target)) {
       return true;
     }
   }
@@ -159,6 +169,33 @@ export function inCheck(game: GameState, color: 'w' | 'b'): boolean {
   return isAttacked(game, king, enemy);
 }
 
+// ---------- 캐슬링 ----------
+
+function castlingMoves(game: GameState, from: number): number[] {
+  const piece = game.board[from]!;
+  const result: number[] = [];
+  const home = piece.color === 'w' ? 0 : 7;      // 백은 1랭크, 흑은 8랭크
+  const enemy = piece.color === 'w' ? 'b' : 'w';
+
+  if (from !== sq(4, home)) return result;        // 킹이 e열 제자리에 없으면 불가
+  if (isAttacked(game, from, enemy)) return result; // 조건 3: 체크 중이면 불가
+
+  const kingSide = piece.color === 'w' ? game.castling.wK : game.castling.bK;
+  const queenSide = piece.color === 'w' ? game.castling.wQ : game.castling.bQ;
+  const b = game.board;
+
+  // 킹 쪽: f, g 비어 있음 + f 공격 안 받음
+  if (kingSide && !b[sq(5, home)] && !b[sq(6, home)] && !isAttacked(game, sq(5, home), enemy)) {
+    result.push(sq(6, home));
+  }
+  // 퀸 쪽: b, c, d 비어 있음 + d 공격 안 받음
+  if (queenSide && !b[sq(1, home)] && !b[sq(2, home)] && !b[sq(3, home)] &&
+      !isAttacked(game, sq(3, home), enemy)) {
+    result.push(sq(2, home));
+  }
+  return result;
+}
+
 // ---------- 수 두기 ----------
 
 // from에서 to로 실제로 수를 둔다 (게임 상태를 직접 바꿈)
@@ -167,12 +204,37 @@ export function makeMove(game: GameState, from: number, to: number): void {
 
   // 앙파상 잡기: 폰이 앙파상 칸으로 가면, 그 뒤에 있는 상대 폰을 없앤다
   if (piece.type === 'p' && to === game.enPassant) {
-    const capturedPawn = sq(fileOf(to), rankOf(from)); // 도착 칸과 같은 열, 출발 칸과 같은 줄
+    const capturedPawn = sq(fileOf(to), rankOf(from));
     game.board[capturedPawn] = null;
+  }
+
+  // 캐슬링: 킹이 옆으로 2칸 가면 룩도 같이 옮긴다
+  if (piece.type === 'k' && Math.abs(fileOf(to) - fileOf(from)) === 2) {
+    const r = rankOf(from);
+    if (fileOf(to) === 6) {
+      game.board[sq(5, r)] = game.board[sq(7, r)]; // 킹 쪽: 룩 h → f
+      game.board[sq(7, r)] = null;
+    } else {
+      game.board[sq(3, r)] = game.board[sq(0, r)]; // 퀸 쪽: 룩 a → d
+      game.board[sq(0, r)] = null;
+    }
   }
 
   game.board[to] = piece;
   game.board[from] = null;
+
+  // 캐슬링 권리 갱신
+  if (piece.type === 'k') {
+    if (piece.color === 'w') { game.castling.wK = false; game.castling.wQ = false; }
+    else                     { game.castling.bK = false; game.castling.bQ = false; }
+  }
+  // 구석(룩 자리)에서 무언가 떠나거나, 구석의 무언가가 잡히면 그쪽 권리 상실
+  for (const s of [from, to]) {
+    if (s === sq(0, 0)) game.castling.wQ = false; // a1
+    if (s === sq(7, 0)) game.castling.wK = false; // h1
+    if (s === sq(0, 7)) game.castling.bQ = false; // a8
+    if (s === sq(7, 7)) game.castling.bK = false; // h8
+  }
 
   // 앙파상 칸 기록: 폰이 두 칸 전진했으면 건너뛴 칸을, 아니면 지움
   if (piece.type === 'p' && Math.abs(rankOf(to) - rankOf(from)) === 2) {
@@ -195,12 +257,14 @@ export function movesFrom(game: GameState, from: number): number[] {
   const piece = game.board[from];
   if (!piece) return [];
 
-  const legal: number[] = [];
+  const candidates = pseudoMoves(game, from);
+  if (piece.type === 'k') candidates.push(...castlingMoves(game, from)); // 캐슬링은 여기서 추가
 
-  for (const to of pseudoMoves(game, from)) {
-    const copy = structuredClone(game); // 게임 전체 복사
-    makeMove(copy, from, to);           // 복사본에 둬보기
-    if (!inCheck(copy, piece.color)) legal.push(to); // 내 킹이 안전하면 OK
+  const legal: number[] = [];
+  for (const to of candidates) {
+    const copy = structuredClone(game);
+    makeMove(copy, from, to);
+    if (!inCheck(copy, piece.color)) legal.push(to); // 조건 5도 여기서 해결
   }
   return legal;
 }
