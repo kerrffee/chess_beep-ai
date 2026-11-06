@@ -162,6 +162,7 @@ function onSquareClick(index: number) {
       pendingPromotion = { from: selected, to: index }; // 창을 띄우고 고를 때까지 기다림
     } else {
       play({ from: selected, to: index });
+            select(null);
     }
   } else {
     select(null);
