@@ -69,3 +69,42 @@ body {
   cursor: pointer;
 }
 .restart:hover { background: #666; }
+
+/* 프로모션 고르기 창 */
+.promo-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.promo-box {
+  background: #3a3a3a;
+  padding: 20px 24px;
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+}
+.promo-title {
+  color: #eee;
+  font-size: 18px;
+  font-family: sans-serif;
+}
+.promo-row {
+  display: flex;
+  gap: 8px;
+}
+.promo-piece {
+  width: 64px;
+  height: 64px;
+  font-size: 48px;
+  font-family: "Apple Symbols", "Segoe UI Symbol", sans-serif;
+  border: none;
+  border-radius: 8px;
+  background: #f0d9b5;
+  cursor: pointer;
+}
+.promo-piece:hover { background: #f6f669; }
