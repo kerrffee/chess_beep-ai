@@ -87,8 +87,7 @@ function onSquareClick(index: number) {
   } else if (piece && piece.color === game.turn) {
     select(index);
   } else if (targets.includes(index)) {
-        makeMove(game, selected, index);
-    select(null);
+       makeMove(game, { from: selected, to: index });    select(null);
   } else {
     select(null);
   }
