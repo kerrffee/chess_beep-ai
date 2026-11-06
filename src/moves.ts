@@ -154,6 +154,24 @@ export function inCheck(game: GameState, color: 'w' | 'b'): boolean {
   return isAttacked(game, king, enemy);
 }
 
+// ---------- 수 두기 ----------
+
+// from에서 to로 실제로 수를 둔다 (게임 상태를 직접 바꿈)
+export function makeMove(game: GameState, from: number, to: number): void {
+  const piece = game.board[from]!;
+
+  game.board[to] = piece;
+  game.board[from] = null;
+
+  // 프로모션: 폰이 상대 끝 줄에 도착하면 퀸으로 (고르기 기능은 나중에)
+  const lastRank = piece.color === 'w' ? 7 : 0;
+  if (piece.type === 'p' && rankOf(to) === lastRank) {
+    game.board[to] = { color: piece.color, type: 'q' };
+  }
+
+  game.turn = game.turn === 'w' ? 'b' : 'w';
+}
+
 // from 칸 기물이 "진짜로" 둘 수 있는 칸 (내 킹을 위험하게 만드는 수 제외)
 export function movesFrom(game: GameState, from: number): number[] {
   const piece = game.board[from];
@@ -162,34 +180,23 @@ export function movesFrom(game: GameState, from: number): number[] {
   const legal: number[] = [];
 
   for (const to of pseudoMoves(game, from)) {
-    // 1) 둬보기
-    const captured = game.board[to];
-    game.board[to] = piece;
-    game.board[from] = null;
-
-    // 2) 이 상태에서 내 킹이 공격받는지 확인
-    const illegal = inCheck(game, piece.color);
-
-    // 3) 되돌리기
-    game.board[from] = piece;
-    game.board[to] = captured;
-
-    if (!illegal) legal.push(to);
+    const copy = structuredClone(game); // 게임 전체 복사
+    makeMove(copy, from, to);           // 복사본에 둬보기
+    if (!inCheck(copy, piece.color)) legal.push(to); // 내 킹이 안전하면 OK
   }
   return legal;
 }
+
 // ---------- 게임 끝 판정 ----------
 
 export type Status = 'playing' | 'checkmate' | 'stalemate';
 
 export function gameStatus(game: GameState): Status {
-  // 지금 둘 차례인 쪽 기물 중 하나라도 둘 수 있는 수가 있으면 계속
   for (let i = 0; i < 64; i++) {
     const p = game.board[i];
     if (p && p.color === game.turn && movesFrom(game, i).length > 0) {
       return 'playing';
     }
   }
-  // 둘 수 있는 수가 0개
   return inCheck(game, game.turn) ? 'checkmate' : 'stalemate';
 }

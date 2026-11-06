@@ -1,6 +1,6 @@
 import './style.css';
 import { initialGame, sq, type GameState } from './board';
-import { movesFrom, inCheck, gameStatus } from './moves';
+import { movesFrom, inCheck, gameStatus, makeMove } from './moves';
 
 const SYMBOLS: Record<string, string> = {
   wk: '♔', wq: '♕', wr: '♖', wb: '♗', wn: '♘', wp: '♙',
@@ -87,10 +87,8 @@ function onSquareClick(index: number) {
   } else if (piece && piece.color === game.turn) {
     select(index);
   } else if (targets.includes(index)) {
-    game.board[index] = game.board[selected];
-    game.board[selected] = null;
+        makeMove(game, selected, index);
     select(null);
-    game.turn = game.turn === 'w' ? 'b' : 'w';
   } else {
     select(null);
   }
