@@ -40,3 +40,13 @@ body {
 
 .square { cursor: pointer; }
 .square.selected { background: #f6f669; }
+.square { position: relative; }
+
+.square.target::after {
+  content: '';
+  position: absolute;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.25);
+}
