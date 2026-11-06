@@ -1,6 +1,6 @@
 import './style.css';
 import { initialGame, sq, type GameState } from './board';
-import { movesFrom } from './moves';
+import { movesFrom, inCheck } from './moves';
 
 const SYMBOLS: Record<string, string> = {
   wk: '♔', wq: '♕', wr: '♖', wb: '♗', wn: '♘', wp: '♙',
@@ -9,15 +9,17 @@ const SYMBOLS: Record<string, string> = {
 
 const game: GameState = initialGame();
 let selected: number | null = null;
-let targets: number[] = []; // 선택한 기물이 갈 수 있는 칸들
+let targets: number[] = [];
 
 function render() {
   const app = document.querySelector<HTMLDivElement>('#app')!;
   app.innerHTML = '';
 
+  const checked = inCheck(game, game.turn); // 지금 둘 차례인 쪽이 체크인지
+
   const info = document.createElement('div');
   info.className = 'info';
-  info.textContent = game.turn === 'w' ? '백 차례' : '흑 차례';
+  info.textContent = (game.turn === 'w' ? '백 차례' : '흑 차례') + (checked ? ' — 체크!' : '');
   app.appendChild(info);
 
   const boardEl = document.createElement('div');
@@ -26,13 +28,18 @@ function render() {
   for (let rank = 7; rank >= 0; rank--) {
     for (let file = 0; file < 8; file++) {
       const index = sq(file, rank);
+      const piece = game.board[index];
+
       const cell = document.createElement('div');
       const isLight = (file + rank) % 2 === 1;
       cell.className = 'square ' + (isLight ? 'light' : 'dark');
-      if (index === selected) cell.classList.add('selected');
-      if (targets.includes(index)) cell.classList.add('target');
 
-      const piece = game.board[index];
+      if (index === selected) cell.classList.add('selected');
+      if (targets.includes(index)) cell.classList.add(piece ? 'capture' : 'target');
+      if (checked && piece && piece.type === 'k' && piece.color === game.turn) {
+        cell.classList.add('check');
+      }
+
       if (piece) cell.textContent = SYMBOLS[piece.color + piece.type];
 
       cell.addEventListener('click', () => onSquareClick(index));
@@ -57,13 +64,11 @@ function onSquareClick(index: number) {
   } else if (piece && piece.color === game.turn) {
     select(index);
   } else if (targets.includes(index)) {
-    // 갈 수 있는 칸일 때만 이동
     game.board[index] = game.board[selected];
     game.board[selected] = null;
     select(null);
     game.turn = game.turn === 'w' ? 'b' : 'w';
   } else {
-    // 못 가는 칸을 누르면 선택 취소
     select(null);
   }
 

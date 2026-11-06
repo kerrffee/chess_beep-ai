@@ -78,22 +78,19 @@ function pawnMoves(game: GameState, from: number): number[] {
   const f = fileOf(from);
   const r = rankOf(from);
 
-  const dir = piece.color === 'w' ? 1 : -1;       // 앞 방향: 백은 위(+1), 흑은 아래(-1)
-  const startRank = piece.color === 'w' ? 1 : 6;  // 출발 줄: 백은 2랭크, 흑은 7랭크
+  const dir = piece.color === 'w' ? 1 : -1;
+  const startRank = piece.color === 'w' ? 1 : 6;
 
-  // 1. 앞으로 한 칸
   const oneRank = r + dir;
   if (onBoard(f, oneRank) && !game.board[sq(f, oneRank)]) {
     result.push(sq(f, oneRank));
 
-    // 2. 출발 줄이면 두 칸 (한 칸 앞이 비어 있을 때만 여기까지 옴)
     const twoRank = r + 2 * dir;
     if (r === startRank && !game.board[sq(f, twoRank)]) {
       result.push(sq(f, twoRank));
     }
   }
 
-  // 3. 대각선 잡기 (왼쪽, 오른쪽)
   for (const df of [-1, 1]) {
     const nf = f + df;
     if (!onBoard(nf, oneRank)) continue;
@@ -106,8 +103,8 @@ function pawnMoves(game: GameState, from: number): number[] {
   return result;
 }
 
-// from 칸의 기물이 갈 수 있는 칸 목록
-export function movesFrom(game: GameState, from: number): number[] {
+// 체크를 따지지 않은 "일단 갈 수 있는 칸"
+function pseudoMoves(game: GameState, from: number): number[] {
   const piece = game.board[from];
   if (!piece) return [];
 
@@ -126,4 +123,58 @@ export function movesFrom(game: GameState, from: number): number[] {
       return pawnMoves(game, from);
   }
   return [];
+}
+
+// ---------- 체크 관련 ----------
+
+// color 색 킹이 있는 칸 번호
+function findKing(game: GameState, color: 'w' | 'b'): number {
+  for (let i = 0; i < 64; i++) {
+    const p = game.board[i];
+    if (p && p.type === 'k' && p.color === color) return i;
+  }
+  return -1;
+}
+
+// target 칸을 attacker 색 기물 중 하나라도 공격하고 있는지
+function isAttacked(game: GameState, target: number, attacker: 'w' | 'b'): boolean {
+  for (let i = 0; i < 64; i++) {
+    const p = game.board[i];
+    if (p && p.color === attacker && pseudoMoves(game, i).includes(target)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// color 색 킹이 지금 체크 상태인지
+export function inCheck(game: GameState, color: 'w' | 'b'): boolean {
+  const king = findKing(game, color);
+  const enemy = color === 'w' ? 'b' : 'w';
+  return isAttacked(game, king, enemy);
+}
+
+// from 칸 기물이 "진짜로" 둘 수 있는 칸 (내 킹을 위험하게 만드는 수 제외)
+export function movesFrom(game: GameState, from: number): number[] {
+  const piece = game.board[from];
+  if (!piece) return [];
+
+  const legal: number[] = [];
+
+  for (const to of pseudoMoves(game, from)) {
+    // 1) 둬보기
+    const captured = game.board[to];
+    game.board[to] = piece;
+    game.board[from] = null;
+
+    // 2) 이 상태에서 내 킹이 공격받는지 확인
+    const illegal = inCheck(game, piece.color);
+
+    // 3) 되돌리기
+    game.board[from] = piece;
+    game.board[to] = captured;
+
+    if (!illegal) legal.push(to);
+  }
+  return legal;
 }
