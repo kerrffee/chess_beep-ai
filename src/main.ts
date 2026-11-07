@@ -14,6 +14,7 @@ const OPPONENTS: { value: Opponent; label: string }[] = [
   { value: 'human', label: '사람 (둘이서)' },
   { value: 'random', label: '랜덤 AI' },
   { value: 'greedy', label: '욕심쟁이 AI' },
+    { value: 'minimax', label: '생각하는 AI (2수 앞)' },
 ];
 const AI_COLOR = 'b';
 const AI_DELAY = 500; // AI가 두기 전에 기다리는 시간(ms). 너무 빠르면 뭘 뒀는지 안 보임
