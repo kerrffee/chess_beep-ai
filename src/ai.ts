@@ -65,6 +65,7 @@ function evaluate(game: GameState): number {
 // depth수 더 내다봤을 때의 점수 (백 입장)
 // 백 차례면 가장 큰 값, 흑 차례면 가장 작은 값을 고름
 function minimax(game: GameState, depth: number): number {
+  stats.nodes++;
   const moves = legalMoves(game);
 
   // 둘 수가 없으면 게임 끝: 체크메이트 또는 스테일메이트
@@ -116,10 +117,75 @@ export function minimaxMove(game: GameState, depth: number): Move {
   return pickRandom(bestMoves);
 }
 
-export const MINIMAX_DEPTH = 2; // 몇 수 앞까지 볼지 (내 수 + 상대 수)
+// ---------- 알파-베타 ----------
+
+// 탐색한 장면 수 (얼마나 일했는지 재보기용)
+export const stats = { nodes: 0 };
+
+// 미니맥스와 같은 값을 내지만, 결과에 영향 없는 가지는 잘라냄
+// alpha: 백(최대 쪽)이 이미 확보한 점수, beta: 흑(최소 쪽)이 이미 확보한 점수
+function alphaBeta(game: GameState, depth: number, alpha: number, beta: number): number {
+  stats.nodes++;
+  const moves = legalMoves(game);
+
+  if (moves.length === 0) {
+    if (!inCheck(game, game.turn)) return 0;
+    return game.turn === 'w' ? -(MATE + depth) : MATE + depth;
+  }
+  if (depth === 0) return evaluate(game);
+
+  if (game.turn === 'w') {
+    let best = -Infinity;
+    for (const move of moves) {
+      const copy = structuredClone(game);
+      makeMove(copy, move);
+      best = Math.max(best, alphaBeta(copy, depth - 1, alpha, beta));
+      alpha = Math.max(alpha, best);
+      if (alpha >= beta) break;   // 흑이 이쪽으로 안 옴 → 나머지 수는 안 봄
+    }
+    return best;
+  } else {
+    let best = Infinity;
+    for (const move of moves) {
+      const copy = structuredClone(game);
+      makeMove(copy, move);
+      best = Math.min(best, alphaBeta(copy, depth - 1, alpha, beta));
+      beta = Math.min(beta, best);
+      if (alpha >= beta) break;   // 백이 이쪽으로 안 옴 → 나머지 수는 안 봄
+    }
+    return best;
+  }
+}
+
+// 알파-베타로 고른 가장 좋은 수. 같은 점수의 수가 여러 개면 그중 아무거나
+export function alphaBetaMove(game: GameState, depth: number): Move {
+  const white = game.turn === 'w';
+  let best = white ? -Infinity : Infinity;
+  let bestMoves: Move[] = [];
+
+  for (const move of legalMoves(game)) {
+    const copy = structuredClone(game);
+    makeMove(copy, move);
+    // 점수는 정수라서, 기준을 1 느슨하게 두면 "지금 최고와 같은 점수"까지 정확히 계산됨
+    const score = white
+      ? alphaBeta(copy, depth - 1, best - 1, Infinity)
+      : alphaBeta(copy, depth - 1, -Infinity, best + 1);
+
+    const better = white ? score > best : score < best;
+    if (better) {
+      best = score;
+      bestMoves = [move];
+    } else if (score === best) {
+      bestMoves.push(move);
+    }
+  }
+  return pickRandom(bestMoves);
+}
+
+export const SEARCH_DEPTH = 2; // 몇 수 앞까지 볼지
 
 export function chooseMove(kind: AIKind, game: GameState): Move {
   if (kind === 'random') return randomMove(game);
   if (kind === 'greedy') return greedyMove(game);
-  return minimaxMove(game, MINIMAX_DEPTH);
+  return alphaBetaMove(game, SEARCH_DEPTH);
 }
