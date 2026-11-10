@@ -1,7 +1,7 @@
 import './style.css';
 import { initialGame, fromFEN, sq, type GameState, type PieceType } from './board';
 import { movesFrom, inCheck, gameStatus, makeMove, legalMoves, positionKey, type Move } from './moves';
-import { chooseMove, type AIKind } from './ai';
+import type { AIKind } from './ai';
 
 const SYMBOLS: Record<string, string> = {
   wk: '♔', wq: '♕', wr: '♖', wb: '♗', wn: '♘', wp: '♙',
@@ -37,6 +37,31 @@ let lastMove: Move | null = null;
 let opponent: Opponent = 'human';
 let aiTimer: number | null = null;
 
+// ---------- AI 일꾼(Web Worker) ----------
+// AI 계산은 일꾼에게 맡기고, 화면은 계속 움직임
+let worker = makeWorker();
+let aiRequest = 0;    // 몇 번째 부탁인지 (다시 시작한 뒤 도착한 옛 대답을 버리려고)
+let aiBusy = false;   // 일꾼이 지금 생각 중인지
+let aiStart = 0;      // 부탁한 시각
+
+function makeWorker(): Worker {
+  const w = new Worker(new URL('./ai-worker.ts', import.meta.url), { type: 'module' });
+  w.onmessage = (e: MessageEvent<{ id: number; move: Move }>) => onAIReply(e.data.id, e.data.move);
+  return w;
+}
+
+// AI를 멈춤: 기다리던 타이머를 끄고, 생각 중이면 일꾼을 새로 만듦(하던 계산은 버림)
+function stopAI() {
+  if (aiTimer !== null) clearTimeout(aiTimer);
+  aiTimer = null;
+  if (aiBusy) {
+    worker.terminate();
+    worker = makeWorker();
+  }
+  aiBusy = false;
+  aiRequest++; // 혹시 오는 옛 대답은 번호가 안 맞아서 무시됨
+}
+
 // 수를 두고 장면 기록까지 하는 함수. 화면에서는 이것만 씀
 function play(move: Move) {
   makeMove(game, move);
@@ -45,8 +70,7 @@ function play(move: Move) {
 }
 
 function restart() {
-  if (aiTimer !== null) clearTimeout(aiTimer);
-  aiTimer = null;
+  stopAI();
   Object.assign(game, newGame()); // 게임 상태를 처음으로 덮어쓰기
   history = [positionKey(game)];
   lastMove = null;
@@ -60,15 +84,26 @@ function isAITurn(): boolean {
   return opponent !== 'human' && game.turn === AI_COLOR && gameStatus(game, history) === 'playing';
 }
 
-// AI 차례면 잠깐 기다렸다가 한 수 둠
+// AI 차례면 일꾼에게 지금 장면을 보내고 생각해 달라고 부탁함
 function maybeAIMove() {
-  if (!isAITurn() || aiTimer !== null) return;
+  if (!isAITurn() || aiBusy || aiTimer !== null) return;
+  aiBusy = true;
+  aiStart = Date.now();
+  worker.postMessage({ id: ++aiRequest, kind: opponent as AIKind, game });
+}
+
+// 일꾼의 대답이 오면 둠. 다만 부탁한 지 AI_DELAY가 안 됐으면 그때까지 기다림
+// (너무 빨리 두면 뭘 뒀는지 안 보여서)
+function onAIReply(id: number, move: Move) {
+  if (id !== aiRequest) return; // 다시 시작하기 전에 한 부탁의 대답 → 버림
+  aiBusy = false;
+  const wait = Math.max(0, AI_DELAY - (Date.now() - aiStart));
   aiTimer = setTimeout(() => {
     aiTimer = null;
     if (!isAITurn()) return;
-    play(chooseMove(opponent as AIKind, game));
+    play(move);
     render();
-  }, AI_DELAY);
+  }, wait);
 }
 
 function statusText(): string {
