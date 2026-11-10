@@ -62,5 +62,70 @@ export const MARBLE: Theme = {
   sunIntensity: 2.0,
 };
 
-export const THEMES: Theme[] = [CLASSIC, MARBLE];
+// 미니멀·현대: 밝은 회색 스튜디오, 무광 흰색/검정 기물, 나뭇결 거의 없는 회색 판
+export const MINIMAL: Theme = {
+  id: 'minimal',
+  name: '미니멀',
+  modelMaterials: false,
+  background: 0xe4e4e1, // 밝은 회색 배경 (바닥도 같은 색)
+  envIntensity: 0.8, // 스튜디오처럼 고르게 퍼지는 빛
+  ambient: 0.3,
+  sunColor: 0xffffff, // 색이 없는 하얀 빛
+  sunIntensity: 1.6,
+  // 무광 흰색: 거칠기를 높이고 코팅 없음
+  whitePiece: {
+    color: 0xdcdcd8, // 흰 칸에 묻히지 않게 아주 살짝 회색
+    roughness: 0.85,
+    metalness: 0,
+    clearcoat: 0,
+  },
+  // 무광 검정
+  blackPiece: {
+    color: 0x1a1a1a,
+    roughness: 0.8,
+    metalness: 0,
+    clearcoat: 0,
+  },
+  // 나뭇결 색을 바탕색과 거의 같게 해서 결이 거의 안 보이게
+  lightSquare: { base: '#ecece9', grain: '#e4e4e0' },
+  darkSquare: { base: '#76787c', grain: '#717377' },
+  frame: { base: '#2c2d30', grain: '#28292c' },
+};
+
+// 판타지: 아주 어두운 밤, 푸른 달빛, 은은하게 빛나는 기물
+// emissive = 기물이 스스로 내는 빛의 색, emissiveIntensity = 그 세기
+export const FANTASY: Theme = {
+  id: 'fantasy',
+  name: '판타지',
+  modelMaterials: false,
+  background: 0x07060f, // 거의 검은 남보라
+  envIntensity: 0.25,
+  ambient: 0.05,
+  sunColor: 0x8f9cff, // 푸른 달빛
+  sunIntensity: 1.2,
+  // 흰 쪽: 얼음빛 수정, 하늘색으로 빛남
+  whitePiece: {
+    color: 0xc4defa,
+    roughness: 0.25,
+    clearcoat: 1.0,
+    clearcoatRoughness: 0.1,
+    emissive: 0x3a9cff,
+    emissiveIntensity: 0.3,
+  },
+  // 검은 쪽: 흑요석, 보라색으로 빛남
+  blackPiece: {
+    color: 0x0e0a18,
+    roughness: 0.2,
+    clearcoat: 1.0,
+    clearcoatRoughness: 0.05,
+    emissive: 0x9a3cff,
+    emissiveIntensity: 0.12,
+  },
+  // 어두운 돌판: 결 색을 밝게 해서 마법 무늬처럼
+  lightSquare: { base: '#2a2e4a', grain: '#4a5590' },
+  darkSquare: { base: '#110e22', grain: '#33256a' },
+  frame: { base: '#0b0916', grain: '#3c2c78' },
+};
+
+export const THEMES: Theme[] = [CLASSIC, MARBLE, MINIMAL, FANTASY];
 
