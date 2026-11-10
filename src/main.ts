@@ -83,7 +83,14 @@ async function ensure3D() {
     board3D.setView(view3D);
   } catch (err) {
     console.error(err);
-    error3D = '3D를 켤 수 없어요. 이 기기나 브라우저가 3D 그래픽(WebGL)을 지원하지 않는 것 같아요.';
+    // 원인을 같이 보여 줌: 3D 그래픽(WebGL) 자체가 꺼져 있는지, 다른 문제인지
+    let webgl = false;
+    try { webgl = !!document.createElement('canvas').getContext('webgl2'); } catch { /* 확인 실패 = 없음 */ }
+    const reason = err instanceof Error ? err.message : String(err);
+    error3D = webgl
+      ? `3D를 켜다가 문제가 생겼어요. (자세한 이유: ${reason})`
+      : '3D를 켤 수 없어요. 이 브라우저에서 3D 그래픽(WebGL)이 꺼져 있어요. '
+        + '크롬이면 설정 → 시스템 → "가능한 경우 그래픽 가속 사용"을 켜고 크롬을 다시 시작해 보세요.';
     use3D = false;
   }
   loading3D = false;
