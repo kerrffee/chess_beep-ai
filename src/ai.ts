@@ -1,5 +1,5 @@
 import { cloneGame, type GameState, type PieceType } from './board';
-import { legalMoves, makeMove, unmakeMove, inCheck, type Move } from './moves';
+import { legalMoves, makeMove, unmakeMove, inCheck, positionKey, insufficientMaterial, type Move } from './moves';
 
 export type AIKind = 'random' | 'greedy' | 'minimax';
 
@@ -260,10 +260,34 @@ function orderScore(game: GameState, move: Move): number {
   return score;
 }
 
+// ---------- 킬러 수 ----------
+// 다른 가지에서 상대를 막아서(가지치기를 일으켜서) 잘라내게 한 "조용한 수"는
+// 같은 깊이의 옆 가지에서도 좋은 경우가 많음 → 잡는 수 다음, 나머지 조용한 수보다 먼저 봄
+// killers[ply] = 그 깊이(맨 위에서 몇 수째)에서 최근에 가지치기를 일으킨 조용한 수 최대 2개
+let killers: Move[][] = [];
+const KILLER_SCORE = 50; // 잡는 수(최소 100)보다는 낮고, 그냥 조용한 수(0)보다는 높게
+
+function sameMove(a: Move, b: Move): boolean {
+  return a.from === b.from && a.to === b.to && a.promotion === b.promotion;
+}
+
+function addKiller(ply: number, move: Move) {
+  const list = killers[ply] ?? (killers[ply] = []);
+  if (list.length > 0 && sameMove(list[0], move)) return;
+  list.unshift(move);   // 맨 앞에 넣고
+  if (list.length > 2) list.pop(); // 2개만 남김
+}
+
 // 둘 수 있는 수를 "좋아 보이는 순서"로 정렬해서 돌려줌
-function orderedMoves(game: GameState): Move[] {
+// ply를 주면 그 깊이의 킬러 수도 앞으로 당김
+function orderedMoves(game: GameState, ply = -1): Move[] {
+  const list = ply >= 0 ? killers[ply] : undefined;
   return legalMoves(game)
-    .map(move => ({ move, score: orderScore(game, move) }))
+    .map(move => {
+      let score = orderScore(game, move);
+      if (score === 0 && list && list.some(k => sameMove(k, move))) score = KILLER_SCORE;
+      return { move, score };
+    })
     .sort((a, b) => b.score - a.score)
     .map(item => item.move);
 }
@@ -281,28 +305,50 @@ function checkTime() {
   if ((stats.nodes & 1023) === 0 && Date.now() > deadline) throw new TimeUp();
 }
 
+// ---------- 무승부 규칙 ----------
+// gameHistory: 실제 게임에서 나온 장면들 (지금 장면 포함, 화면에서 받아옴)
+// path: gameHistory + 탐색하면서 지나온 장면들. 탐색 중 한 번이라도 같은 장면이 다시 나오면 무승부(0점)로 침
+//   (실제 규칙은 3번이지만, 한 번 돌아온 장면은 또 돌아올 수 있어서 엔진들은 보통 이렇게 계산함)
+let gameHistory: string[] = [];
+let path: string[] = [];
+
+// 지금 장면(key)이 앞에서 나온 적 있는지
+// 잡거나 폰을 움직인 뒤로는 그 전 장면이 다시 나올 수 없어서, halfmoveClock만큼만 거슬러 봄
+// 같은 쪽 차례인 장면끼리만 같을 수 있어서 2칸씩 건너뜀
+function isRepetition(key: string, halfmoveClock: number): boolean {
+  const n = path.length;
+  for (let i = n - 2; i >= 0 && i >= n - halfmoveClock; i -= 2) {
+    if (path[i] === key) return true;
+  }
+  return false;
+}
+
 // ---------- 정지 탐색 ----------
 
 // 정해진 깊이를 다 본 뒤, 잡는 싸움이 끝날 때까지 "잡는 수만" 더 봄 (수평선 효과 막기)
 // 차례인 쪽은 "안 잡고 멈추기"도 고를 수 있음 → 지금 장면 점수(standPat)가 최소 보장 점수
+// 단, 체크당한 상태면 멈출 수 없음 → 체크를 피하는 수를 전부 봄
 function quiesce(game: GameState, alpha: number, beta: number): number {
   stats.nodes++;
   checkTime();
   const moves = orderedMoves(game);
+  const checked = inCheck(game, game.turn);
 
   if (moves.length === 0) {
-    if (!inCheck(game, game.turn)) return 0;
+    if (!checked) return 0;
     return game.turn === 'w' ? -MATE : MATE;
   }
 
-  const standPat = evaluate(game); // 여기서 멈추면 받는 점수
+  const white = game.turn === 'w';
+  // 여기서 멈추면 받는 점수. 체크당했으면 멈추기가 없으니 "최악"에서 시작
+  const standPat = checked ? (white ? -Infinity : Infinity) : evaluate(game);
 
-  if (game.turn === 'w') {
+  if (white) {
     let best = standPat;
     alpha = Math.max(alpha, best);
     if (alpha >= beta) return best;
     for (const move of moves) {
-      if (orderScore(game, move) === 0) break; // 정렬돼 있어서, 여기부터는 전부 조용한 수
+      if (!checked && orderScore(game, move) === 0) break; // 정렬돼 있어서, 여기부터는 전부 조용한 수
       const undo = makeMove(game, move);
       best = Math.max(best, quiesce(game, alpha, beta));
       unmakeMove(game, move, undo);
@@ -315,7 +361,7 @@ function quiesce(game: GameState, alpha: number, beta: number): number {
     beta = Math.min(beta, best);
     if (alpha >= beta) return best;
     for (const move of moves) {
-      if (orderScore(game, move) === 0) break;
+      if (!checked && orderScore(game, move) === 0) break;
       const undo = makeMove(game, move);
       best = Math.min(best, quiesce(game, alpha, beta));
       unmakeMove(game, move, undo);
@@ -328,45 +374,68 @@ function quiesce(game: GameState, alpha: number, beta: number): number {
 
 // ---------- 알파-베타 ----------
 
+const MAX_EXTEND_PLY = 20; // 체크 연장은 맨 위에서 이 수까지만 (체크가 끝없이 이어지는 걸 막으려고)
+
 // 미니맥스와 같은 값을 내지만, 결과에 영향 없는 가지는 잘라냄
 // alpha: 백(최대 쪽)이 이미 확보한 점수, beta: 흑(최소 쪽)이 이미 확보한 점수
 function alphaBeta(game: GameState, depth: number, alpha: number, beta: number): number {
   stats.nodes++;
   checkTime();
-  const moves = orderedMoves(game); // 좋아 보이는 수부터
+  const ply = path.length - gameHistory.length; // 맨 위에서 몇 수째인지
+
+  // 무승부 규칙: 같은 장면 반복, 50수, 메이트할 기물 부족 → 0점
+  const key = positionKey(game);
+  if (game.halfmoveClock >= 100 || isRepetition(key, game.halfmoveClock) || insufficientMaterial(game)) return 0;
+
+  const checked = inCheck(game, game.turn);
+  const moves = orderedMoves(game, ply); // 좋아 보이는 수부터 (잡는 수 → 킬러 수 → 나머지)
 
   if (moves.length === 0) {
-    if (!inCheck(game, game.turn)) return 0;
+    if (!checked) return 0;
     return game.turn === 'w' ? -(MATE + depth) : MATE + depth;
   }
-  if (depth === 0) return quiesce(game, alpha, beta); // 끝에서 바로 세지 않고, 잡는 싸움부터 마저 봄
+  // 체크 연장: 체크당했으면 한 수 더 봄 (체크 다음에 결정적인 수가 오는 경우가 많아서)
+  if (checked && ply < MAX_EXTEND_PLY) depth++;
+  if (depth <= 0) return quiesce(game, alpha, beta); // 끝에서 바로 세지 않고, 잡는 싸움부터 마저 봄
 
-  if (game.turn === 'w') {
-    let best = -Infinity;
-    for (const move of moves) {
-      const undo = makeMove(game, move);
-      best = Math.max(best, alphaBeta(game, depth - 1, alpha, beta));
-      unmakeMove(game, move, undo);
-      alpha = Math.max(alpha, best);
-      if (alpha >= beta) break;   // 흑이 이쪽으로 안 옴 → 나머지 수는 안 봄
+  path.push(key);
+  try {
+    if (game.turn === 'w') {
+      let best = -Infinity;
+      for (const move of moves) {
+        const undo = makeMove(game, move);
+        best = Math.max(best, alphaBeta(game, depth - 1, alpha, beta));
+        unmakeMove(game, move, undo);
+        alpha = Math.max(alpha, best);
+        if (alpha >= beta) {      // 흑이 이쪽으로 안 옴 → 나머지 수는 안 봄
+          if (orderScore(game, move) === 0) addKiller(ply, move);
+          break;
+        }
+      }
+      return best;
+    } else {
+      let best = Infinity;
+      for (const move of moves) {
+        const undo = makeMove(game, move);
+        best = Math.min(best, alphaBeta(game, depth - 1, alpha, beta));
+        unmakeMove(game, move, undo);
+        beta = Math.min(beta, best);
+        if (alpha >= beta) {      // 백이 이쪽으로 안 옴 → 나머지 수는 안 봄
+          if (orderScore(game, move) === 0) addKiller(ply, move);
+          break;
+        }
+      }
+      return best;
     }
-    return best;
-  } else {
-    let best = Infinity;
-    for (const move of moves) {
-      const undo = makeMove(game, move);
-      best = Math.min(best, alphaBeta(game, depth - 1, alpha, beta));
-      unmakeMove(game, move, undo);
-      beta = Math.min(beta, best);
-      if (alpha >= beta) break;   // 백이 이쪽으로 안 옴 → 나머지 수는 안 봄
-    }
-    return best;
+  } finally {
+    path.pop();
   }
 }
 
 // 맨 위(지금 장면)에서 moves를 주어진 순서대로 depth수 앞까지 봄
 // 돌려주는 것: 가장 좋은 점수와, 그 점수를 내는 수 전부
 function searchRoot(game: GameState, depth: number, moves: Move[]): { best: number; bestMoves: Move[] } {
+  path = gameHistory.slice(); // 탐색 경로는 실제 게임 기록에서 시작
   const white = game.turn === 'w';
   let best = white ? -Infinity : Infinity;
   let bestMoves: Move[] = [];
@@ -390,15 +459,23 @@ function searchRoot(game: GameState, depth: number, moves: Move[]): { best: numb
   return { best, bestMoves };
 }
 
+// 탐색 시작 준비: 게임 기록을 받아 두고(없으면 지금 장면만), 킬러 수를 비움
+function startSearch(game: GameState, history?: string[]) {
+  gameHistory = history && history.length > 0 ? history.slice() : [positionKey(game)];
+  killers = [];
+}
+
 // 알파-베타로 고른 가장 좋은 수 (깊이 고정, 테스트용). 같은 점수의 수가 여러 개면 그중 아무거나
-export function alphaBetaMove(original: GameState, depth: number): Move {
+export function alphaBetaMove(original: GameState, depth: number, history?: string[]): Move {
   const game = cloneGame(original); // 탐색은 복사본 위에서
+  startSearch(game, history);
   return pickRandom(searchRoot(game, depth, orderedMoves(game)).bestMoves);
 }
 
 // 테스트용: depth수 앞까지 본 점수 (백 기준)
-export function searchScore(original: GameState, depth: number): number {
+export function searchScore(original: GameState, depth: number, history?: string[]): number {
   const game = cloneGame(original);
+  startSearch(game, history);
   return searchRoot(game, depth, orderedMoves(game)).best;
 }
 
@@ -409,10 +486,11 @@ export function searchScore(original: GameState, depth: number): number {
 export const TIME_LIMIT = 1000; // AI가 한 수에 쓰는 시간(ms)
 const MAX_DEPTH = 30;           // 남은 수가 적어서 금방 끝나는 장면에서 끝없이 깊어지지 않게
 
-export function iterativeMove(original: GameState, timeLimit: number): Move {
+export function iterativeMove(original: GameState, timeLimit: number, history?: string[]): Move {
   const start = Date.now();
   // 탐색은 복사본 위에서: 시간이 다 돼서 탐색 도중에 빠져나오면 판이 두다 만 상태로 남기 때문
   const game = cloneGame(original);
+  startSearch(game, history);
   let moves = orderedMoves(game);
   if (moves.length === 1) { stats.depth = 0; return moves[0]; } // 둘 수 있는 게 하나뿐이면 바로
 
@@ -438,8 +516,9 @@ export function iterativeMove(original: GameState, timeLimit: number): Move {
   return pickRandom(result.bestMoves);
 }
 
-export function chooseMove(kind: AIKind, game: GameState): Move {
+// history: 실제 게임 장면 기록 (반복 무승부 판단용). timeLimit: 생각하는 AI가 쓸 시간(ms)
+export function chooseMove(kind: AIKind, game: GameState, history?: string[], timeLimit = TIME_LIMIT): Move {
   if (kind === 'random') return randomMove(game);
   if (kind === 'greedy') return greedyMove(game);
-  return iterativeMove(game, TIME_LIMIT);
+  return iterativeMove(game, timeLimit, history);
 }

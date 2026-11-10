@@ -426,7 +426,7 @@ export function positionKey(game: GameState): string {
 }
 
 // 양쪽 다 체크메이트를 만들 수 없는 기물만 남았는지
-function insufficientMaterial(game: GameState): boolean {
+export function insufficientMaterial(game: GameState): boolean {
   const others: { type: string; square: number }[] = [];
   for (let i = 0; i < 64; i++) {
     const p = game.board[i];

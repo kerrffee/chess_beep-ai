@@ -92,7 +92,7 @@ function maybeAIMove() {
   if (!isAITurn() || aiBusy || aiTimer !== null) return;
   aiBusy = true;
   aiStart = Date.now();
-  worker.postMessage({ id: ++aiRequest, kind: opponent as AIKind, game });
+  worker.postMessage({ id: ++aiRequest, kind: opponent as AIKind, game, history });
 }
 
 // 일꾼의 대답이 오면 둠. 다만 부탁한 지 AI_DELAY가 안 됐으면 그때까지 기다림
