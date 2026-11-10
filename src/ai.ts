@@ -1,5 +1,6 @@
 import { cloneGame, type GameState, type PieceType } from './board';
 import { legalMoves, makeMove, unmakeMove, inCheck, positionKey, insufficientMaterial, type Move } from './moves';
+import { computeHash, hashFromKey, hashHi, hashLo } from './zobrist';
 
 export type AIKind = 'random' | 'greedy' | 'minimax';
 
@@ -279,13 +280,14 @@ function addKiller(ply: number, move: Move) {
 }
 
 // 둘 수 있는 수를 "좋아 보이는 순서"로 정렬해서 돌려줌
-// ply를 주면 그 깊이의 킬러 수도 앞으로 당김
-function orderedMoves(game: GameState, ply = -1): Move[] {
+// ply를 주면 그 깊이의 킬러 수도 앞으로 당김. ttMove(전치표가 기억한 최선의 수)가 있으면 맨 앞
+function orderedMoves(game: GameState, ply = -1, ttMove = -1): Move[] {
   const list = ply >= 0 ? killers[ply] : undefined;
   return legalMoves(game)
     .map(move => {
       let score = orderScore(game, move);
-      if (score === 0 && list && list.some(k => sameMove(k, move))) score = KILLER_SCORE;
+      if (ttMove >= 0 && encodeMove(move) === ttMove) score = TT_MOVE_SCORE;
+      else if (score === 0 && list && list.some(k => sameMove(k, move))) score = KILLER_SCORE;
       return { move, score };
     })
     .sort((a, b) => b.score - a.score)
@@ -306,21 +308,53 @@ function checkTime() {
 }
 
 // ---------- 무승부 규칙 ----------
-// gameHistory: 실제 게임에서 나온 장면들 (지금 장면 포함, 화면에서 받아옴)
-// path: gameHistory + 탐색하면서 지나온 장면들. 탐색 중 한 번이라도 같은 장면이 다시 나오면 무승부(0점)로 침
+// historyHi/Lo: 실제 게임에서 나온 장면들의 지문 (지금 장면 포함, 화면이 보낸 이름표에서 계산)
+// pathHi/Lo: 게임 기록 + 탐색하면서 지나온 장면들의 지문. 탐색 중 한 번이라도 같은 장면이 다시 나오면 무승부(0점)로 침
 //   (실제 규칙은 3번이지만, 한 번 돌아온 장면은 또 돌아올 수 있어서 엔진들은 보통 이렇게 계산함)
-let gameHistory: string[] = [];
-let path: string[] = [];
+// 지문은 32비트 두 개(hi, lo)라서 배열도 두 개
+let historyHi: number[] = [], historyLo: number[] = [];
+let pathHi: number[] = [], pathLo: number[] = [];
 
-// 지금 장면(key)이 앞에서 나온 적 있는지
+// 지금 장면이 앞에서 나온 적 있는지
 // 잡거나 폰을 움직인 뒤로는 그 전 장면이 다시 나올 수 없어서, halfmoveClock만큼만 거슬러 봄
 // 같은 쪽 차례인 장면끼리만 같을 수 있어서 2칸씩 건너뜀
-function isRepetition(key: string, halfmoveClock: number): boolean {
-  const n = path.length;
+function isRepetition(hi: number, lo: number, halfmoveClock: number): boolean {
+  const n = pathHi.length;
   for (let i = n - 2; i >= 0 && i >= n - halfmoveClock; i -= 2) {
-    if (path[i] === key) return true;
+    if (pathHi[i] === hi && pathLo[i] === lo) return true;
   }
   return false;
+}
+
+// ---------- 전치표 (이미 본 장면 기억하기) ----------
+// 체스는 다른 순서로 둬도 같은 장면이 자주 나옴 (나이트 f3 → 나이트 c3 = 나이트 c3 → 나이트 f3)
+// 그래서 한 번 계산한 장면은 "지문 → 결과"로 적어 두고, 다시 나오면 계산 대신 꺼내 씀
+// 칸 수가 정해진 표라서, 지문의 아랫부분으로 칸을 정하고 같은 칸에 새 결과가 오면 덮어씀
+// 한 칸에 적는 것: 지문(진짜 같은 장면인지 확인용), 몇 수 앞까지 봤는지, 점수, 점수의 종류, 최선의 수
+const TT_BITS = 20;                 // 칸 2^20개 (약 100만). 메모리 약 18MB
+const TT_SIZE = 1 << TT_BITS;
+const TT_MASK = TT_SIZE - 1;
+const ttHi = new Int32Array(TT_SIZE);
+const ttLo = new Int32Array(TT_SIZE);
+const ttDepth = new Int8Array(TT_SIZE);
+const ttScore = new Int32Array(TT_SIZE);
+const ttFlag = new Uint8Array(TT_SIZE);   // 0 = 빈 칸
+const ttMoveArr = new Int32Array(TT_SIZE);
+// 점수의 종류: 알파-베타는 가지를 잘라서, 점수가 "정확한 값"이 아니라 "이 이상/이 이하"일 때가 있음
+const EXACT = 1; // 정확한 점수
+const LOWER = 2; // 진짜 점수 ≥ 적힌 점수 (더 좋은 수가 있어서 중간에 잘림)
+const UPPER = 3; // 진짜 점수 ≤ 적힌 점수 (어떤 수도 기준을 못 넘음)
+const TT_MOVE_SCORE = 1_000_000; // 전치표의 최선의 수는 무엇보다 먼저 봄
+export const ttStats = { hits: 0 };
+
+// 수를 숫자 하나로: 출발 칸 + 도착 칸×64 + 프로모션×4096
+const PROMO_CODE: Record<string, number> = { q: 1, r: 2, b: 3, n: 4 };
+function encodeMove(m: Move): number {
+  return m.from | (m.to << 6) | ((m.promotion ? PROMO_CODE[m.promotion] : 0) << 12);
+}
+
+function clearTT() {
+  ttFlag.fill(0);
 }
 
 // ---------- 정지 탐색 ----------
@@ -381,61 +415,79 @@ const MAX_EXTEND_PLY = 20; // 체크 연장은 맨 위에서 이 수까지만 (�
 function alphaBeta(game: GameState, depth: number, alpha: number, beta: number): number {
   stats.nodes++;
   checkTime();
-  const ply = path.length - gameHistory.length; // 맨 위에서 몇 수째인지
+  const ply = pathHi.length - historyHi.length; // 맨 위에서 몇 수째인지
+  computeHash(game);
+  const hi = hashHi, lo = hashLo;
 
   // 무승부 규칙: 같은 장면 반복, 50수, 메이트할 기물 부족 → 0점
-  const key = positionKey(game);
-  if (game.halfmoveClock >= 100 || isRepetition(key, game.halfmoveClock) || insufficientMaterial(game)) return 0;
+  if (game.halfmoveClock >= 100 || isRepetition(hi, lo, game.halfmoveClock) || insufficientMaterial(game)) return 0;
 
   const checked = inCheck(game, game.turn);
-  const moves = orderedMoves(game, ply); // 좋아 보이는 수부터 (잡는 수 → 킬러 수 → 나머지)
-
-  if (moves.length === 0) {
-    if (!checked) return 0;
-    return game.turn === 'w' ? -(MATE + depth) : MATE + depth;
-  }
   // 체크 연장: 체크당했으면 한 수 더 봄 (체크 다음에 결정적인 수가 오는 경우가 많아서)
   if (checked && ply < MAX_EXTEND_PLY) depth++;
   if (depth <= 0) return quiesce(game, alpha, beta); // 끝에서 바로 세지 않고, 잡는 싸움부터 마저 봄
 
-  path.push(key);
+  // 전치표 확인: 같은 장면을 이만큼 이상 깊이 본 적 있으면 그 결과를 씀
+  const slot = lo & TT_MASK;
+  let ttMove = -1;
+  if (ttFlag[slot] !== 0 && ttHi[slot] === hi && ttLo[slot] === lo) {
+    ttMove = ttMoveArr[slot]; // 깊이가 모자라도 "최선의 수"는 먼저 볼 후보로 씀
+    if (ttDepth[slot] >= depth) {
+      const score = ttScore[slot];
+      const flag = ttFlag[slot];
+      if (flag === EXACT) { ttStats.hits++; return score; }
+      if (flag === LOWER) alpha = Math.max(alpha, score);
+      else beta = Math.min(beta, score);
+      if (alpha >= beta) { ttStats.hits++; return score; }
+    }
+  }
+
+  const moves = orderedMoves(game, ply, ttMove); // 전치표의 수 → 잡는 수 → 킬러 수 → 나머지
+  if (moves.length === 0) {
+    if (!checked) return 0;
+    return game.turn === 'w' ? -(MATE + depth) : MATE + depth;
+  }
+
+  const alpha0 = alpha, beta0 = beta; // 점수 종류를 정할 때 쓰는 "탐색 시작할 때의 기준"
+  const white = game.turn === 'w';
+  let best = white ? -Infinity : Infinity;
+  let bestMove = moves[0];
+
+  pathHi.push(hi);
+  pathLo.push(lo);
   try {
-    if (game.turn === 'w') {
-      let best = -Infinity;
-      for (const move of moves) {
-        const undo = makeMove(game, move);
-        best = Math.max(best, alphaBeta(game, depth - 1, alpha, beta));
-        unmakeMove(game, move, undo);
-        alpha = Math.max(alpha, best);
-        if (alpha >= beta) {      // 흑이 이쪽으로 안 옴 → 나머지 수는 안 봄
-          if (orderScore(game, move) === 0) addKiller(ply, move);
-          break;
-        }
+    for (const move of moves) {
+      const undo = makeMove(game, move);
+      const score = alphaBeta(game, depth - 1, alpha, beta);
+      unmakeMove(game, move, undo);
+      if (white ? score > best : score < best) { best = score; bestMove = move; }
+      if (white) alpha = Math.max(alpha, best);
+      else beta = Math.min(beta, best);
+      if (alpha >= beta) {        // 상대가 이쪽으로 안 옴 → 나머지 수는 안 봄
+        if (orderScore(game, move) === 0) addKiller(ply, move);
+        break;
       }
-      return best;
-    } else {
-      let best = Infinity;
-      for (const move of moves) {
-        const undo = makeMove(game, move);
-        best = Math.min(best, alphaBeta(game, depth - 1, alpha, beta));
-        unmakeMove(game, move, undo);
-        beta = Math.min(beta, best);
-        if (alpha >= beta) {      // 백이 이쪽으로 안 옴 → 나머지 수는 안 봄
-          if (orderScore(game, move) === 0) addKiller(ply, move);
-          break;
-        }
-      }
-      return best;
     }
   } finally {
-    path.pop();
+    pathHi.pop();
+    pathLo.pop();
   }
+
+  // 전치표에 적기
+  ttHi[slot] = hi;
+  ttLo[slot] = lo;
+  ttDepth[slot] = depth;
+  ttScore[slot] = best;
+  ttFlag[slot] = best <= alpha0 ? UPPER : best >= beta0 ? LOWER : EXACT;
+  ttMoveArr[slot] = encodeMove(bestMove);
+  return best;
 }
 
 // 맨 위(지금 장면)에서 moves를 주어진 순서대로 depth수 앞까지 봄
 // 돌려주는 것: 가장 좋은 점수와, 그 점수를 내는 수 전부
 function searchRoot(game: GameState, depth: number, moves: Move[]): { best: number; bestMoves: Move[] } {
-  path = gameHistory.slice(); // 탐색 경로는 실제 게임 기록에서 시작
+  pathHi = historyHi.slice(); // 탐색 경로는 실제 게임 기록에서 시작
+  pathLo = historyLo.slice();
   const white = game.turn === 'w';
   let best = white ? -Infinity : Infinity;
   let bestMoves: Move[] = [];
@@ -459,10 +511,18 @@ function searchRoot(game: GameState, depth: number, moves: Move[]): { best: numb
   return { best, bestMoves };
 }
 
-// 탐색 시작 준비: 게임 기록을 받아 두고(없으면 지금 장면만), 킬러 수를 비움
+// 탐색 시작 준비: 게임 기록을 지문으로 바꿔 두고(없으면 지금 장면만), 킬러 수와 전치표를 비움
 function startSearch(game: GameState, history?: string[]) {
-  gameHistory = history && history.length > 0 ? history.slice() : [positionKey(game)];
+  const keys = history && history.length > 0 ? history : [positionKey(game)];
+  historyHi = [];
+  historyLo = [];
+  for (const key of keys) {
+    hashFromKey(key);
+    historyHi.push(hashHi);
+    historyLo.push(hashLo);
+  }
   killers = [];
+  clearTT(); // 새로 생각할 때마다 표를 비움 (게임 기록이 달라지면 무승부 점수도 달라질 수 있어서)
 }
 
 // 알파-베타로 고른 가장 좋은 수 (깊이 고정, 테스트용). 같은 점수의 수가 여러 개면 그중 아무거나
