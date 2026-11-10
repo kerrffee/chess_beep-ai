@@ -1,62 +1,179 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { makePiece, type PieceKind } from './pieces';
+import { CLASSIC, type Theme, type WoodLook } from './themes';
 
-// 장면, 카메라, 그리는 장치
-const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x20232a);
+const theme: Theme = CLASSIC; // 나중에 설정 메뉴에서 바꿀 부분
 
-const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
-camera.position.set(2.5, 4, 6);
-
+// ── 그리는 장치 ──
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setPixelRatio(window.devicePixelRatio);
+renderer.toneMapping = THREE.ACESFilmicToneMapping; // 영화 같은 색 보정
+renderer.toneMappingExposure = 0.9;
+renderer.shadowMap.enabled = true; // 그림자 켜기
+renderer.shadowMap.type = THREE.PCFSoftShadowMap; // 가장자리가 부드러운 그림자
 document.body.appendChild(renderer.domElement);
 
-// 마우스로 돌려 보기 (끌기: 회전, 휠: 확대)
+// ── 장면과 카메라 ──
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(theme.background);
+
+// 주변 환경 반사: 가상의 방 풍경을 표면에 비춤
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+scene.environmentIntensity = theme.envIntensity;
+
+const camera = new THREE.PerspectiveCamera(40, window.innerWidth / window.innerHeight, 0.1, 100);
+camera.position.set(0, 9, 10); // 흰 쪽 뒤, 비스듬히 위
+
 const controls = new OrbitControls(camera, renderer.domElement);
-controls.target.set(2.5, 0.3, 0.5);
+controls.target.set(0, 0, 0);
+controls.enableDamping = true; // 손을 떼도 부드럽게 멈춤
+controls.maxPolarAngle = Math.PI * 0.47; // 판 아래로는 못 내려가게
+controls.minDistance = 4;
+controls.maxDistance = 25;
 controls.update();
 
-// 조명: 전체를 은은하게 + 한쪽에서 비추는 빛
-scene.add(new THREE.AmbientLight(0xffffff, 0.6));
-const sun = new THREE.DirectionalLight(0xffffff, 1.5);
-sun.position.set(3, 5, 4);
+// ── 조명 ──
+scene.add(new THREE.AmbientLight(0xffffff, theme.ambient));
+const sun = new THREE.DirectionalLight(theme.sunColor, theme.sunIntensity);
+sun.position.set(-4, 8, 3);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048); // 그림자 선명도
+sun.shadow.camera.left = -6;
+sun.shadow.camera.right = 6;
+sun.shadow.camera.top = 6;
+sun.shadow.camera.bottom = -6;
+sun.shadow.bias = -0.0005; // 기물 표면에 줄무늬가 생기는 것 방지
+sun.shadow.radius = 4;
 scene.add(sun);
 
-// 칸 6 × 2 (칸 한 변 = 1)
+// ── 나뭇결 그림 (코드로 그림, 파일 필요 없음) ──
+function woodTexture(look: WoodLook): THREE.CanvasTexture {
+  const size = 256;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d')!;
+  ctx.fillStyle = look.base;
+  ctx.fillRect(0, 0, size, size);
+  ctx.strokeStyle = look.grain;
+  for (let i = 0; i < 70; i++) {
+    const y0 = Math.random() * size;
+    const amp = 2 + Math.random() * 5; // 결이 휘는 정도
+    const freq = 0.01 + Math.random() * 0.02;
+    const phase = Math.random() * Math.PI * 2;
+    ctx.globalAlpha = 0.08 + Math.random() * 0.25;
+    ctx.lineWidth = 0.5 + Math.random() * 2;
+    ctx.beginPath();
+    for (let x = 0; x <= size; x += 4) {
+      const y = y0 + Math.sin(x * freq + phase) * amp;
+      if (x === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.anisotropy = renderer.capabilities.getMaxAnisotropy(); // 비스듬히 봐도 선명하게
+  return tex;
+}
+
+// 칸마다 나뭇결이 조금씩 다르게: 같은 그림의 다른 부분을 잘라 씀
+function woodMaterial(base: THREE.CanvasTexture, rotate: boolean): THREE.MeshPhysicalMaterial {
+  const tex = base.clone();
+  tex.repeat.set(0.5, 0.5);
+  tex.offset.set(Math.random() * 0.5, Math.random() * 0.5);
+  if (rotate) {
+    tex.center.set(0.5, 0.5);
+    tex.rotation = Math.PI / 2;
+  }
+  tex.needsUpdate = true;
+  return new THREE.MeshPhysicalMaterial({
+    map: tex,
+    roughness: 0.45,
+    clearcoat: 0.4, // 니스 칠한 느낌
+    clearcoatRoughness: 0.3,
+  });
+}
+
+// ── 판 ──
+// 칸 좌표: file(왼→오 0~7), rank(흰 쪽 0 → 검은 쪽 7)
+// 3D 위치: x = file - 3.5, z = 3.5 - rank (흰 쪽이 카메라 가까이)
+function squarePosition(file: number, rank: number): THREE.Vector3 {
+  return new THREE.Vector3(file - 3.5, 0, 3.5 - rank);
+}
+
+const lightWood = woodTexture(theme.lightSquare);
+const darkWood = woodTexture(theme.darkSquare);
 const squareGeo = new THREE.BoxGeometry(1, 0.1, 1);
-const light = new THREE.MeshStandardMaterial({ color: 0xeed7b0 });
-const dark = new THREE.MeshStandardMaterial({ color: 0x9c6b43 });
-for (let x = 0; x < 6; x++) {
-  for (let z = 0; z < 2; z++) {
-    const sq = new THREE.Mesh(squareGeo, (x + z) % 2 === 0 ? light : dark);
-    sq.position.set(x, -0.05, z);
+for (let file = 0; file < 8; file++) {
+  for (let rank = 0; rank < 8; rank++) {
+    const isLight = (file + rank) % 2 === 1; // a1(0,0)은 어두운 칸
+    const mat = woodMaterial(isLight ? lightWood : darkWood, (file + rank) % 2 === 0);
+    const sq = new THREE.Mesh(squareGeo, mat);
+    sq.position.copy(squarePosition(file, rank));
+    sq.position.y = -0.05; // 윗면이 높이 0
+    sq.receiveShadow = true;
     scene.add(sq);
   }
 }
 
-// 앞줄 흰 기물, 뒷줄 검은 기물: 폰 룩 나이트 비숍 퀸 킹
-const kinds: PieceKind[] = ['p', 'r', 'n', 'b', 'q', 'k'];
-kinds.forEach((kind, x) => {
-  const white = makePiece(kind, 'w');
-  white.position.set(x, 0, 1);
-  scene.add(white);
+// 테두리
+const frameTex = woodTexture(theme.frame);
+frameTex.repeat.set(3, 3);
+const frame = new THREE.Mesh(
+  new THREE.BoxGeometry(9, 0.36, 9),
+  new THREE.MeshPhysicalMaterial({ map: frameTex, roughness: 0.4, clearcoat: 0.6, clearcoatRoughness: 0.2 }),
+);
+frame.position.y = -0.19; // 윗면이 칸보다 살짝 아래
+frame.receiveShadow = true;
+frame.castShadow = true;
+scene.add(frame);
 
-  const black = makePiece(kind, 'b');
-  black.position.set(x, 0, 0);
-  scene.add(black);
-});
+// 판 아래 바닥 (그림자를 받는 넓은 면)
+const floor = new THREE.Mesh(
+  new THREE.PlaneGeometry(60, 60),
+  new THREE.MeshStandardMaterial({ color: theme.background, roughness: 1 }),
+);
+floor.rotation.x = -Math.PI / 2;
+floor.position.y = -0.37;
+floor.receiveShadow = true;
+scene.add(floor);
 
-// 창 크기가 바뀌면 맞추기
+// ── 기물: 시작 배치 ──
+const whiteMat = new THREE.MeshPhysicalMaterial(theme.whitePiece);
+const blackMat = new THREE.MeshPhysicalMaterial(theme.blackPiece);
+const backRank: PieceKind[] = ['r', 'n', 'b', 'q', 'k', 'b', 'n', 'r'];
+
+function place(kind: PieceKind, isWhite: boolean, file: number, rank: number) {
+  const piece = makePiece(kind, isWhite ? whiteMat : blackMat);
+  piece.position.copy(squarePosition(file, rank));
+  // 나이트 머리가 상대 쪽을 보게 돌림 (다른 기물은 둥글어서 상관없음)
+  piece.rotation.y = isWhite ? Math.PI / 2 : -Math.PI / 2;
+  scene.add(piece);
+}
+
+for (let file = 0; file < 8; file++) {
+  place(backRank[file], true, file, 0);
+  place('p', true, file, 1);
+  place('p', false, file, 6);
+  place(backRank[file], false, file, 7);
+}
+
+// ── 창 크기가 바뀌면 맞추기 ──
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
-// 1초에 약 60번 다시 그리기
+// ── 1초에 약 60번 다시 그리기 ──
 renderer.setAnimationLoop(() => {
+  controls.update();
   renderer.render(scene, camera);
 });
