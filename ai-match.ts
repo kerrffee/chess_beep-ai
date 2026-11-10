@@ -5,12 +5,12 @@
 //   예: npx tsx ai-match.ts master coward 4
 //       npx tsx ai-match.ts master coward 4 100   ← 빨리 보고 싶을 때: 모든 생각하는 AI를 0.1초로
 //   성격 id: master(대가), attacker(돌격대장), coward(겁쟁이), queenlover(퀸 사랑꾼),
-//            chaos(혼돈), greedy(욕심쟁이), random(랜덤)
+//            bluffer(허세꾼), excuser(핑계왕), chaos(혼돈), greedy(욕심쟁이), random(랜덤)
 //   백·흑은 한 판씩 번갈아 맡음
 //   생각 시간을 적지 않으면 성격마다 정해진 시간(대가는 1초)
 import { initialGame, type Color } from './src/board';
 import { gameStatus, makeMove, positionKey } from './src/moves';
-import { chooseMove } from './src/ai';
+import { chooseMove, moveToUci } from './src/ai';
 import { PERSONALITIES, type Personality } from './src/personality';
 
 const [a = 'master', b = 'greedy', gamesArg = '4', msArg] = process.argv.slice(2);
@@ -30,6 +30,7 @@ const GAMES = Number(gamesArg);
 function playGame(white: Personality, black: Personality): { result: Color | 'draw'; reason: string; moves: number } {
   const game = initialGame();
   const history = [positionKey(game)];
+  const ucis: string[] = []; // 둔 수 목록 (성격별 오프닝용)
   let moves = 0;
 
   while (true) {
@@ -38,7 +39,9 @@ function playGame(white: Personality, black: Personality): { result: Color | 'dr
     if (status !== 'playing') return { result: 'draw', reason: status, moves };
 
     const p = game.turn === 'w' ? white : black;
-    makeMove(game, chooseMove(p, game, history));
+    const move = chooseMove(p, game, history, undefined, ucis);
+    makeMove(game, move);
+    ucis.push(moveToUci(move));
     history.push(positionKey(game));
     moves++;
   }

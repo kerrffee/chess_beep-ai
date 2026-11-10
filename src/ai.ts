@@ -418,8 +418,9 @@ function orderedMoves(game: GameState, ply = -1, ttMove = -1): Move[] {
     .map(item => item.move);
 }
 
-// 탐색한 장면 수 (얼마나 일했는지 재보기용), 마지막 탐색에서 끝까지 본 깊이
-export const stats = { nodes: 0, depth: 0 };
+// 탐색한 장면 수, 마지막 탐색에서 끝까지 본 깊이,
+// 마지막으로 고른 수의 점수(AI 입장: +면 AI가 유리), 오프닝 목록에서 둔 수인지
+export const stats = { nodes: 0, depth: 0, score: 0, book: false };
 
 // ---------- 시간 제한 ----------
 // 시간이 다 되면 TimeUp을 던져서 탐색을 한 번에 빠져나옴 (try/catch로 받음)
@@ -678,7 +679,7 @@ export function iterativeMove(original: GameState, timeLimit: number, history?: 
   const game = cloneGame(original);
   startSearch(game, history);
   let moves = orderedMoves(game);
-  if (moves.length === 1) { stats.depth = 0; return moves[0]; } // 둘 수 있는 게 하나뿐이면 바로
+  if (moves.length === 1) { stats.depth = 0; stats.score = 0; return moves[0]; } // 둘 수 있는 게 하나뿐이면 바로
 
   // 1수 앞은 시간과 상관없이 끝까지 (그래야 낼 수가 항상 있음)
   let result = searchRoot(game, 1, moves);
@@ -699,6 +700,7 @@ export function iterativeMove(original: GameState, timeLimit: number, history?: 
   } finally {
     deadline = Infinity; // 다음 탐색(테스트 등)에 시간 제한이 남지 않게
   }
+  stats.score = game.turn === 'w' ? result.best : -result.best; // AI 입장 점수로
   return pickRandom(result.bestMoves);
 }
 
@@ -730,11 +732,38 @@ function maybeMistake(original: GameState, best: Move, p: Personality, history?:
   return pickRandom(candidates).move;
 }
 
+// ---------- 오프닝 목록 ----------
+// 성격마다 좋아하는 첫 몇 수(personality.ts의 openings). 지금까지 둔 수가 어떤 줄의 앞부분과 같고,
+// 그 줄의 다음 수가 AI 차례면 그 수를 그대로 둠 (맞는 줄이 여러 개면 아무거나)
+// 수는 "출발칸도착칸" 글자로 적음 (예: e2e4 = e2에서 e4로)
+export function moveToUci(m: Move): string {
+  const name = (s: number) => 'abcdefgh'[s % 8] + (Math.floor(s / 8) + 1);
+  return name(m.from) + name(m.to) + (m.promotion ?? '');
+}
+
+function bookMove(p: Personality, game: GameState, moveHistory?: string[]): Move | null {
+  if (!p.openings || !moveHistory) return null;
+  const n = moveHistory.length;
+  const nextMoves = p.openings
+    .filter(line => line.length > n && moveHistory.every((m, i) => line[i] === m))
+    .map(line => line[n]);
+  if (nextMoves.length === 0) return null;
+  const uci = pickRandom(nextMoves);
+  // 그 수가 지금 진짜로 둘 수 있는 수인지 확인 (적은 줄에 오타가 있어도 안전하게)
+  return legalMoves(game).find(m => moveToUci(m) === uci) ?? null;
+}
+
 // personality: 누가 두는지(성격). history: 실제 게임 장면 기록 (반복 무승부 판단용)
 // timeLimit: 성격에 생각 시간이 정해져 있지 않을 때 쓸 시간(ms)
-export function chooseMove(p: Personality, game: GameState, history?: string[], timeLimit = TIME_LIMIT): Move {
+// moveHistory: 처음부터 둔 수 목록 (오프닝 목록 확인용, 처음 배치에서 시작했을 때만)
+export function chooseMove(p: Personality, game: GameState, history?: string[], timeLimit = TIME_LIMIT,
+                           moveHistory?: string[]): Move {
+  stats.book = false;
+  stats.score = 0;
   if (p.kind === 'random') return randomMove(game);
   if (p.kind === 'greedy') return greedyMove(game);
+  const book = bookMove(p, game, moveHistory);
+  if (book) { stats.book = true; stats.depth = 0; return book; }
   applyPersonality(p, game.turn); // 지금 차례인 쪽 = AI
   const best = iterativeMove(game, p.timeLimit ?? timeLimit, history);
   return maybeMistake(game, best, p, history);

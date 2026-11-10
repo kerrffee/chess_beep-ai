@@ -190,3 +190,26 @@ body {
   text-align: center;
   padding: 0 12px;
 }
+
+/* AI 말풍선: 이름 + 대사. 판 너비에 맞추고, 비어 있어도 높이 유지 */
+.speech {
+  width: calc(var(--sq) * 8 + 8px);
+  box-sizing: border-box;
+  min-height: 40px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: #f4ead5;
+  color: #2b2b2b;
+  font-family: sans-serif;
+  font-size: 15px;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+.speech.empty { background: transparent; }
+.speech.empty .speaker { color: #666; }
+.speaker {
+  font-weight: bold;
+  color: #8a5a2b;
+  white-space: nowrap;
+}
