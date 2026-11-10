@@ -1,4 +1,4 @@
-import type { GameState, PieceType } from './board';
+import { cloneGame, type GameState, type PieceType } from './board';
 import { legalMoves, makeMove, inCheck, type Move } from './moves';
 
 export type AIKind = 'random' | 'greedy' | 'minimax';
@@ -79,7 +79,7 @@ function minimax(game: GameState, depth: number): number {
   if (game.turn === 'w') {
     let best = -Infinity;
     for (const move of moves) {
-      const copy = structuredClone(game);
+      const copy = cloneGame(game);
       makeMove(copy, move);
       best = Math.max(best, minimax(copy, depth - 1));
     }
@@ -87,7 +87,7 @@ function minimax(game: GameState, depth: number): number {
   } else {
     let best = Infinity;
     for (const move of moves) {
-      const copy = structuredClone(game);
+      const copy = cloneGame(game);
       makeMove(copy, move);
       best = Math.min(best, minimax(copy, depth - 1));
     }
@@ -102,7 +102,7 @@ export function minimaxMove(game: GameState, depth: number): Move {
   let bestMoves: Move[] = [];
 
   for (const move of legalMoves(game)) {
-    const copy = structuredClone(game);
+    const copy = cloneGame(game);
     makeMove(copy, move);
     const score = minimax(copy, depth - 1);
 
@@ -166,7 +166,7 @@ function quiesce(game: GameState, alpha: number, beta: number): number {
     if (alpha >= beta) return best;
     for (const move of moves) {
       if (orderScore(game, move) === 0) break; // 정렬돼 있어서, 여기부터는 전부 조용한 수
-      const copy = structuredClone(game);
+      const copy = cloneGame(game);
       makeMove(copy, move);
       best = Math.max(best, quiesce(copy, alpha, beta));
       alpha = Math.max(alpha, best);
@@ -179,7 +179,7 @@ function quiesce(game: GameState, alpha: number, beta: number): number {
     if (alpha >= beta) return best;
     for (const move of moves) {
       if (orderScore(game, move) === 0) break;
-      const copy = structuredClone(game);
+      const copy = cloneGame(game);
       makeMove(copy, move);
       best = Math.min(best, quiesce(copy, alpha, beta));
       beta = Math.min(beta, best);
@@ -206,7 +206,7 @@ function alphaBeta(game: GameState, depth: number, alpha: number, beta: number):
   if (game.turn === 'w') {
     let best = -Infinity;
     for (const move of moves) {
-      const copy = structuredClone(game);
+      const copy = cloneGame(game);
       makeMove(copy, move);
       best = Math.max(best, alphaBeta(copy, depth - 1, alpha, beta));
       alpha = Math.max(alpha, best);
@@ -216,7 +216,7 @@ function alphaBeta(game: GameState, depth: number, alpha: number, beta: number):
   } else {
     let best = Infinity;
     for (const move of moves) {
-      const copy = structuredClone(game);
+      const copy = cloneGame(game);
       makeMove(copy, move);
       best = Math.min(best, alphaBeta(copy, depth - 1, alpha, beta));
       beta = Math.min(beta, best);
@@ -233,7 +233,7 @@ export function alphaBetaMove(game: GameState, depth: number): Move {
   let bestMoves: Move[] = [];
 
   for (const move of orderedMoves(game)) {
-    const copy = structuredClone(game);
+    const copy = cloneGame(game);
     makeMove(copy, move);
     // 점수는 정수라서, 기준을 1 느슨하게 두면 "지금 최고와 같은 점수"까지 정확히 계산됨
     const score = white

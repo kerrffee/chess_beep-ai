@@ -1,4 +1,4 @@
-import { sq, type GameState, type PieceType } from './board';
+import { sq, cloneGame, type GameState, type PieceType } from './board';
 
 // 수 하나: 출발 칸, 도착 칸, (폰이 끝 줄에 갈 때) 변신할 기물
 export interface Move {
@@ -271,7 +271,7 @@ export function legalMoves(game: GameState): Move[] {
 
     for (const to of candidates) {
       // 둬봐서 내 킹이 안전한지 확인
-      const copy = structuredClone(game);
+      const copy = cloneGame(game);
       makeMove(copy, { from, to });
       if (inCheck(copy, piece.color)) continue;
 

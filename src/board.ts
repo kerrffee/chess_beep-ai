@@ -37,6 +37,18 @@ export interface GameState {
   halfmoveClock: number;    // 4. 50수 규칙 카운터
 }
 
+// 장면 복사 (structuredClone보다 훨씬 빠름)
+// 기물 객체는 바뀌는 일이 없어서(makeMove는 칸에 넣고 빼기만 함) 배열만 새로 만들면 충분함
+export function cloneGame(game: GameState): GameState {
+  return {
+    board: game.board.slice(),
+    turn: game.turn,
+    castling: { ...game.castling },
+    enPassant: game.enPassant,
+    halfmoveClock: game.halfmoveClock,
+  };
+}
+
 export function initialGame(): GameState {
   return {
     board: initialBoard(),

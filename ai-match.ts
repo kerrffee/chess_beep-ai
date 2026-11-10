@@ -1,3 +1,5 @@
+/// <reference types="node" />
+
 import { initialGame, type Color } from './src/board';
 import { gameStatus, makeMove, positionKey } from './src/moves';
 import { chooseMove, type AIKind } from './src/ai';
