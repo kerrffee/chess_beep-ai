@@ -173,17 +173,108 @@ export function greedyMove(game: GameState): Move {
 
 const MATE = 100000; // 체크메이트 점수. 어떤 기물 점수보다도 훨씬 큼
 
-// 평가함수 v2: (기물 값 + 그 칸의 보너스)를 백 전부 더한 것 − 흑 전부 더한 것 (백 입장 점수)
+// ---------- 평가함수 v3: 위치 판단 항목 ----------
+// 기물 값과 좋은 칸 표만으로는 못 보는 것들. 숫자는 전부 "폰 1개 = 100" 기준
+// 나중에 성격마다 이 숫자들을 바꿔서 쓸 수 있게 한곳에 모아 둠
+export const EVAL_WEIGHTS = {
+  doubledPawn: 15,     // 같은 세로줄에 내 폰이 2개 이상: 서로 막고, 지켜 주지 못함 (1개 더 있을 때마다 −)
+  isolatedPawn: 15,    // 양옆 세로줄에 내 폰이 없음: 다른 폰이 지켜 줄 수 없음
+  passedPawn: [0, 5, 10, 20, 35, 60, 100, 0], // 앞을 막을 상대 폰이 없는 폰. 몇 줄 나왔는지별 보너스(끝판엔 2배)
+  bishopPair: 30,      // 비숍 2개를 다 갖고 있음: 흰 칸·검은 칸을 다 다룰 수 있음
+  rookOpenFile: 20,    // 룩이 폰이 하나도 없는 세로줄에 있음
+  rookHalfOpen: 10,    // 룩이 내 폰은 없고 상대 폰만 있는 세로줄에 있음
+  kingShield1: 10,     // 킹 바로 앞 칸(3개 세로줄)의 내 폰 하나당 (중반에만)
+  kingShield2: 5,      // 킹 두 칸 앞의 내 폰 하나당 (중반에만)
+  kingOpenFile: 15,    // 킹 앞 3개 세로줄 중 내 폰이 없는 줄 하나당 − (중반에만)
+};
+
+// 평가함수 v3: (기물 값 + 그 칸의 보너스) + 위치 판단 항목, 백 − 흑 (백 입장 점수)
 // +면 백이 유리, −면 흑이 유리
-// 킹 표는 게임 단계(중반 ↔ 끝판)에 따라 섞어서 씀
+// 킹 표와 킹 안전은 게임 단계(중반 ↔ 끝판)에 따라 섞어서 씀
 export function evaluate(game: GameState): number {
+  const W = EVAL_WEIGHTS;
   const phase = gamePhase(game);
+  const b = game.board;
   let score = 0;
+
+  // 한 번 훑으면서 기물 점수를 더하고, 폰 위치·비숍 수·킹 위치를 모아 둠
+  const pawnsOnFile = { w: [0, 0, 0, 0, 0, 0, 0, 0], b: [0, 0, 0, 0, 0, 0, 0, 0] };
+  const bishops = { w: 0, b: 0 };
+  const king = { w: -1, b: -1 };
   for (let s = 0; s < 64; s++) {
-    const p = game.board[s];
+    const p = b[s];
     if (!p) continue;
     const v = VALUE[p.type] + pstBonus(p.type, p.color, s, phase);
     score += p.color === 'w' ? v : -v;
+    if (p.type === 'p') pawnsOnFile[p.color][s % 8]++;
+    else if (p.type === 'b') bishops[p.color]++;
+    else if (p.type === 'k') king[p.color] = s;
+  }
+
+  // 백 기준으로 계산하고, 흑은 같은 계산을 거꾸로 해서 뺌
+  for (const color of ['w', 'b'] as const) {
+    const sign = color === 'w' ? 1 : -1;
+    const enemy = color === 'w' ? 'b' : 'w';
+    const mine = pawnsOnFile[color], theirs = pawnsOnFile[enemy];
+    let s = 0;
+
+    // 폰 구조: 겹친 폰, 고립된 폰
+    for (let f = 0; f < 8; f++) {
+      if (mine[f] > 1) s -= W.doubledPawn * (mine[f] - 1);
+      if (mine[f] > 0 && (f === 0 || mine[f - 1] === 0) && (f === 7 || mine[f + 1] === 0)) {
+        s -= W.isolatedPawn * mine[f];
+      }
+    }
+
+    // 통과한 폰, 룩의 세로줄 (칸마다 보기)
+    for (let sq = 0; sq < 64; sq++) {
+      const p = b[sq];
+      if (!p || p.color !== color) continue;
+      const f = sq % 8, r = Math.floor(sq / 8);
+      if (p.type === 'p') {
+        // 앞쪽(백은 위, 흑은 아래)의 같은 줄·옆 줄에 상대 폰이 하나도 없으면 통과한 폰
+        let passed = true;
+        for (let df = -1; df <= 1 && passed; df++) {
+          const nf = f + df;
+          if (nf < 0 || nf > 7) continue;
+          for (let nr = r + (color === 'w' ? 1 : -1); nr >= 0 && nr <= 7; nr += color === 'w' ? 1 : -1) {
+            const q = b[nr * 8 + nf];
+            if (q && q.type === 'p' && q.color === enemy) { passed = false; break; }
+          }
+        }
+        if (passed) {
+          const advanced = color === 'w' ? r : 7 - r; // 몇 줄 나왔는지 (출발 줄 = 1)
+          // 끝판일수록 통과한 폰이 중요 → 중반 1배 ~ 끝판 2배
+          s += Math.round(W.passedPawn[advanced] * (2 * MAX_PHASE - phase) / MAX_PHASE);
+        }
+      } else if (p.type === 'r') {
+        if (mine[f] === 0 && theirs[f] === 0) s += W.rookOpenFile;
+        else if (mine[f] === 0) s += W.rookHalfOpen;
+      }
+    }
+
+    // 비숍 두 개
+    if (bishops[color] >= 2) s += W.bishopPair;
+
+    // 킹 안전 (중반일수록 중요 → phase 비율만큼만 반영)
+    const k = king[color];
+    if (k >= 0 && phase > 0) {
+      const kf = k % 8, kr = Math.floor(k / 8), up = color === 'w' ? 1 : -1;
+      let shield = 0;
+      for (let df = -1; df <= 1; df++) {
+        const nf = kf + df;
+        if (nf < 0 || nf > 7) continue;
+        const r1 = kr + up, r2 = kr + 2 * up;
+        const p1 = r1 >= 0 && r1 <= 7 ? b[r1 * 8 + nf] : null;
+        const p2 = r2 >= 0 && r2 <= 7 ? b[r2 * 8 + nf] : null;
+        if (p1 && p1.type === 'p' && p1.color === color) shield += W.kingShield1;
+        else if (p2 && p2.type === 'p' && p2.color === color) shield += W.kingShield2;
+        if (mine[nf] === 0) shield -= W.kingOpenFile;
+      }
+      s += Math.round(shield * phase / MAX_PHASE);
+    }
+
+    score += sign * s;
   }
   return score;
 }
