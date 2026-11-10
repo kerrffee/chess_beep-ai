@@ -2,9 +2,16 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { makePiece, type PieceKind } from './pieces';
-import { CLASSIC, type Theme, type WoodLook } from './themes';
+import { CLASSIC, THEMES, type Theme, type WoodLook } from './themes';
+import { loadModelSet } from './modelSet';
 
-const theme: Theme = CLASSIC; // 나중에 설정 메뉴에서 바꿀 부분
+// 테마 고르기: 지금은 주소창으로 (예: 3d.html?theme=marble). 나중에 설정 메뉴로 바꿀 부분
+const themeId = new URLSearchParams(location.search).get('theme');
+const theme: Theme = THEMES.find((t) => t.id === themeId) ?? CLASSIC;
+
+// 다운받은 모델 불러오기 (실패하면 null → 코드로 만든 기물과 나무 판을 씀)
+const modelSet = await loadModelSet();
+const useModelBoard = theme.modelMaterials && modelSet !== null;
 
 // ── 그리는 장치 ──
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -13,7 +20,7 @@ renderer.setPixelRatio(window.devicePixelRatio);
 renderer.toneMapping = THREE.ACESFilmicToneMapping; // 영화 같은 색 보정
 renderer.toneMappingExposure = 0.9;
 renderer.shadowMap.enabled = true; // 그림자 켜기
-renderer.shadowMap.type = THREE.PCFSoftShadowMap; // 가장자리가 부드러운 그림자
+renderer.shadowMap.type = THREE.PCFShadowMap; // 부드러운 그림자 (radius로 퍼짐 조절)
 document.body.appendChild(renderer.domElement);
 
 // ── 장면과 카메라 ──
@@ -108,32 +115,40 @@ function squarePosition(file: number, rank: number): THREE.Vector3 {
   return new THREE.Vector3(file - 3.5, 0, 3.5 - rank);
 }
 
-const lightWood = woodTexture(theme.lightSquare);
-const darkWood = woodTexture(theme.darkSquare);
-const squareGeo = new THREE.BoxGeometry(1, 0.1, 1);
-for (let file = 0; file < 8; file++) {
-  for (let rank = 0; rank < 8; rank++) {
-    const isLight = (file + rank) % 2 === 1; // a1(0,0)은 어두운 칸
-    const mat = woodMaterial(isLight ? lightWood : darkWood, (file + rank) % 2 === 0);
-    const sq = new THREE.Mesh(squareGeo, mat);
-    sq.position.copy(squarePosition(file, rank));
-    sq.position.y = -0.05; // 윗면이 높이 0
-    sq.receiveShadow = true;
-    scene.add(sq);
+let boardBottom = -0.37; // 판 맨 아래 높이 (바닥을 여기에 둠)
+if (useModelBoard) {
+  // 모델의 원래 판
+  const board = modelSet!.makeBoard();
+  scene.add(board);
+  boardBottom = new THREE.Box3().setFromObject(board).min.y;
+} else {
+  const lightWood = woodTexture(theme.lightSquare);
+  const darkWood = woodTexture(theme.darkSquare);
+  const squareGeo = new THREE.BoxGeometry(1, 0.1, 1);
+  for (let file = 0; file < 8; file++) {
+    for (let rank = 0; rank < 8; rank++) {
+      const isLight = (file + rank) % 2 === 1; // a1(0,0)은 어두운 칸
+      const mat = woodMaterial(isLight ? lightWood : darkWood, (file + rank) % 2 === 0);
+      const sq = new THREE.Mesh(squareGeo, mat);
+      sq.position.copy(squarePosition(file, rank));
+      sq.position.y = -0.05; // 윗면이 높이 0
+      sq.receiveShadow = true;
+      scene.add(sq);
+    }
   }
-}
 
-// 테두리
-const frameTex = woodTexture(theme.frame);
-frameTex.repeat.set(3, 3);
-const frame = new THREE.Mesh(
-  new THREE.BoxGeometry(9, 0.36, 9),
-  new THREE.MeshPhysicalMaterial({ map: frameTex, roughness: 0.4, clearcoat: 0.6, clearcoatRoughness: 0.2 }),
-);
-frame.position.y = -0.19; // 윗면이 칸보다 살짝 아래
-frame.receiveShadow = true;
-frame.castShadow = true;
-scene.add(frame);
+  // 테두리
+  const frameTex = woodTexture(theme.frame);
+  frameTex.repeat.set(3, 3);
+  const frame = new THREE.Mesh(
+    new THREE.BoxGeometry(9, 0.36, 9),
+    new THREE.MeshPhysicalMaterial({ map: frameTex, roughness: 0.4, clearcoat: 0.6, clearcoatRoughness: 0.2 }),
+  );
+  frame.position.y = -0.19; // 윗면이 칸보다 살짝 아래
+  frame.receiveShadow = true;
+  frame.castShadow = true;
+  scene.add(frame);
+}
 
 // 판 아래 바닥 (그림자를 받는 넓은 면)
 const floor = new THREE.Mesh(
@@ -141,20 +156,33 @@ const floor = new THREE.Mesh(
   new THREE.MeshStandardMaterial({ color: theme.background, roughness: 1 }),
 );
 floor.rotation.x = -Math.PI / 2;
-floor.position.y = -0.37;
+floor.position.y = boardBottom - 0.001;
 floor.receiveShadow = true;
 scene.add(floor);
 
 // ── 기물: 시작 배치 ──
 const whiteMat = new THREE.MeshPhysicalMaterial(theme.whitePiece);
 const blackMat = new THREE.MeshPhysicalMaterial(theme.blackPiece);
+if (modelSet) {
+  // 모델의 표면 굴곡(나뭇결 조각 자국)을 테마 재질에도 빌려 씀
+  whiteMat.normalMap = modelSet.normalMap(true);
+  blackMat.normalMap = modelSet.normalMap(false);
+}
 const backRank: PieceKind[] = ['r', 'n', 'b', 'q', 'k', 'b', 'n', 'r'];
 
 function place(kind: PieceKind, isWhite: boolean, file: number, rank: number) {
-  const piece = makePiece(kind, isWhite ? whiteMat : blackMat);
+  let piece: THREE.Group;
+  if (modelSet) {
+    // 다운받은 모델: 원본 테마면 원래 재질, 아니면 테마 재질
+    const mat = theme.modelMaterials ? undefined : isWhite ? whiteMat : blackMat;
+    piece = modelSet.makePiece(kind, isWhite, mat);
+  } else {
+    // 모델을 못 불러왔을 때: 코드로 만든 기물
+    piece = makePiece(kind, isWhite ? whiteMat : blackMat);
+    // 나이트 머리가 상대 쪽을 보게 돌림
+    piece.rotation.y = isWhite ? Math.PI / 2 : -Math.PI / 2;
+  }
   piece.position.copy(squarePosition(file, rank));
-  // 나이트 머리가 상대 쪽을 보게 돌림 (다른 기물은 둥글어서 상관없음)
-  piece.rotation.y = isWhite ? Math.PI / 2 : -Math.PI / 2;
   scene.add(piece);
 }
 

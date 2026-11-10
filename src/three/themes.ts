@@ -8,7 +8,9 @@ export interface WoodLook {
 }
 
 export interface Theme {
+  id: string; // 주소창 ?theme=... 에 쓰는 이름
   name: string;
+  modelMaterials: boolean; // true면 기물과 판에 모델의 원래 재질을 그대로 씀
   background: number;
   envIntensity: number; // 주변 환경 반사 세기
   ambient: number; // 전체 밝기
@@ -22,7 +24,9 @@ export interface Theme {
 }
 
 export const CLASSIC: Theme = {
+  id: 'classic',
   name: '클래식',
+  modelMaterials: false,
   background: 0x1b1612,
   envIntensity: 0.6,
   ambient: 0.15,
@@ -47,4 +51,16 @@ export const CLASSIC: Theme = {
   frame: { base: '#3a2414', grain: '#1f130a' },
 };
 
-export const THEMES: Theme[] = [CLASSIC];
+// 대리석: Poly Haven 모델의 원래 재질(대리석 판, 흰/검은 기물)을 그대로 씀
+// (아래 기물·판 색은 모델을 못 불러왔을 때만 쓰임)
+export const MARBLE: Theme = {
+  ...CLASSIC,
+  id: 'marble',
+  name: '대리석',
+  modelMaterials: true,
+  envIntensity: 0.8,
+  sunIntensity: 2.0,
+};
+
+export const THEMES: Theme[] = [CLASSIC, MARBLE];
+
