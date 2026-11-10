@@ -130,3 +130,36 @@ body {
   color: #eee;
   border: 1px solid #666;
 }
+/* 맨 위 고르기 상자들, 맨 아래 버튼들을 한 줄로 */
+.controls {
+  display: flex;
+  gap: 8px;
+}
+.restart:disabled { opacity: 0.4; cursor: default; }
+
+/* 판 + 기보를 옆으로 나란히 */
+.middle {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+/* 기보: 판 높이에 맞추고, 길어지면 스크롤 */
+.moves {
+  width: 190px;
+  height: 520px;
+  overflow-y: auto;
+  background: #333;
+  border-radius: 6px;
+  padding: 8px 10px;
+  box-sizing: border-box;
+  color: #ccc;
+  font-family: Menlo, Consolas, monospace;
+  font-size: 14px;
+}
+.move-row {
+  display: grid;
+  grid-template-columns: 32px 1fr 1fr;
+  line-height: 1.6;
+}
+.move-num { color: #888; }
