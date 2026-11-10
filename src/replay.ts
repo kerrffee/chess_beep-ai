@@ -1,7 +1,7 @@
 // ---------- 기보 다시 보기 화면 ----------
 // PGN 파일을 불러오거나 리그에서 끝난 판을 골라, 한 수씩 앞뒤로 넘겨 봄
 import { cloneGame, type GameState } from './board';
-import { makeMove } from './moves';
+import { makeMove, type Move } from './moves';
 import { parsePGN, type LoadedGame } from './pgn';
 import { drawBoard, drawMoveList, makeButton, scrollMoves } from './view';
 
@@ -50,12 +50,17 @@ function pickFile(rerender: () => void) {
   input.click();
 }
 
-export function renderReplay(app: HTMLElement, rerender: () => void) {
+// drawPosition: 판 그리기 (주지 않으면 2D 판). 대국 화면이 3D면 3D 판을 그려 주는 함수를 넘겨줌
+// viewButton: 2D/3D 전환 버튼 (대국 화면과 같은 설정을 씀)
+export type PositionDrawer = (pos: GameState, lastMove: Move | null) => HTMLElement;
+export function renderReplay(app: HTMLElement, rerender: () => void,
+                             drawPosition?: PositionDrawer, viewButton?: HTMLElement) {
   const g = state.game;
 
   const top = document.createElement('div');
   top.className = 'controls';
   top.appendChild(makeButton('기보 불러오기 (.pgn)', () => pickFile(rerender)));
+  if (viewButton) top.appendChild(viewButton);
   app.appendChild(top);
 
   const info = document.createElement('div');
@@ -75,7 +80,8 @@ export function renderReplay(app: HTMLElement, rerender: () => void) {
 
   const middle = document.createElement('div');
   middle.className = 'middle';
-  middle.appendChild(drawBoard(pos, { lastMove: state.index > 0 ? g.moves[state.index - 1] : null }));
+  const last = state.index > 0 ? g.moves[state.index - 1] : null;
+  middle.appendChild(drawPosition ? drawPosition(pos, last) : drawBoard(pos, { lastMove: last }));
   const side = document.createElement('div');
   side.className = 'side';
   side.appendChild(drawMoveList(g.sans, g.start.turn, {

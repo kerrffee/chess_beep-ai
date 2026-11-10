@@ -81,7 +81,7 @@ export const MINIMAL: Theme = {
   sunIntensity: 1.6,
   // 무광 흰색: 거칠기를 높이고 코팅 없음
   whitePiece: {
-    color: 0xdcdcd8, // 흰 칸에 묻히지 않게 아주 살짝 회색
+    color: 0xf7f7f4, // 거의 흰색 (칸을 연회색으로 해서 기물이 칸보다 밝게 보이게)
     roughness: 0.85,
     metalness: 0,
     clearcoat: 0,
@@ -94,8 +94,8 @@ export const MINIMAL: Theme = {
     clearcoat: 0,
   },
   // 나뭇결 색을 바탕색과 거의 같게 해서 결이 거의 안 보이게
-  lightSquare: { base: '#ecece9', grain: '#e4e4e0' },
-  darkSquare: { base: '#76787c', grain: '#717377' },
+  lightSquare: { base: '#a3a6aa', grain: '#9fa2a6' }, // 회색: 흰 기물이 칸에 묻히지 않게
+  darkSquare: { base: '#5a5d62', grain: '#56595e' },
   frame: { base: '#2c2d30', grain: '#28292c' },
   boardFinish: { roughness: 0.9, clearcoat: 0 }, // 완전한 무광
   pieceCarving: false, // 매끈한 기물 (나무 조각 결 없음)

@@ -1,5 +1,5 @@
 import './style.css';
-import { initialGame, type Color, type PieceType } from './board';
+import { initialGame, type Color, type GameState, type PieceType } from './board';
 import { makeMove, legalMoves, inCheck, gameStatus, type Move } from './moves';
 import type { Board3D, CameraView } from './three/board3d';
 import { playMoveSound, unlockAudio } from './sound';
@@ -80,7 +80,8 @@ async function ensure3D() {
   loading3D = true;
   try {
     const { createBoard3D } = await import('./three/board3d');
-    board3D = await createBoard3D(G.onSquareClick, theme3D);
+    // 판을 누르면 대국 화면일 때만 수를 둠 (기보 보기에서 누른 건 무시)
+    board3D = await createBoard3D(i => { if (screen === 'play') G.onSquareClick(i); }, theme3D);
     board3D.setView(view3D);
   } catch (err) {
     console.error(err);
@@ -129,7 +130,25 @@ function render() {
   app.appendChild(tabs);
 
   if (screen === 'league') { renderLeague(app, render, openLeagueGame); return; }
-  if (screen === 'replay') { renderReplay(app, render); return; }
+  if (screen === 'replay') {
+    // 기보 보기도 대국 화면과 같은 2D/3D 설정을 따름
+    const drawer = use3D ? (pos: GameState, last: Move | null) => {
+      if (!board3D) {
+        ensure3D();
+        const wait = document.createElement('div');
+        wait.className = 'board3d board3d-loading';
+        wait.textContent = '3D 판을 불러오는 중…';
+        return wait;
+      }
+      board3D.update({
+        game: pos, lastMove: last, selected: null, targets: [], flipped: false,
+        inCheck: inCheck(pos, pos.turn), checkmate: gameStatus(pos, []) === 'checkmate',
+      });
+      return board3D.element;
+    } : undefined;
+    renderReplay(app, render, drawer, makeButton(use3D ? '2D로 보기' : '3D로 보기', toggle3D));
+    return;
+  }
   renderPlay(app);
 }
 
