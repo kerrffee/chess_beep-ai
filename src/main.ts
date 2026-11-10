@@ -1,6 +1,7 @@
 import './style.css';
 import { initialGame, type Color, type PieceType } from './board';
-import { makeMove, legalMoves, type Move } from './moves';
+import { makeMove, legalMoves, inCheck, type Move } from './moves';
+import type { Board3D, CameraView } from './three/board3d';
 import { findPersonality } from './personality';
 import { squareName } from './notation';
 import * as G from './game'; // 게임 진행 담당 (판 상태, 수 두기, AI, 대사 …)
@@ -23,6 +24,45 @@ function switchScreen(next: Screen) {
   if (screen === 'play') G.stopAI();       // 대국 화면을 떠나면 AI 생각은 멈춤 (돌아오면 다시 생각함)
   if (screen === 'replay') stopAuto();   // 다시 보기 자동 재생도 멈춤
   screen = next;
+  render();
+}
+
+// ---------- 2D / 3D 보기 ----------
+// 3D 라이브러리(Three.js)와 모델은 용량이 커서, 처음 3D를 켤 때만 불러옴
+// 고른 보기·테마는 브라우저에 기억해 둠 (다음에 들어와도 그대로)
+const remember = (key: string, fallback: string) => { try { return localStorage.getItem(key) ?? fallback; } catch { return fallback; } };
+const keep = (key: string, value: string) => { try { localStorage.setItem(key, value); } catch { /* 저장 못 하면 그냥 넘어감 */ } };
+let use3D = remember('chess.view', '2d') === '3d';
+let theme3D = remember('chess.theme', 'classic');
+let view3D: CameraView = 'angle';
+let board3D: Board3D | null = null;
+let loading3D = false;
+let error3D = '';
+const THEME_LIST = [ // themes.ts의 THEMES와 같은 순서 (3D를 켜기 전에는 그 파일을 불러오지 않아서 따로 적음)
+  { value: 'classic', label: '테마: 클래식' },
+  { value: 'marble', label: '테마: 대리석' },
+];
+
+function toggle3D() {
+  use3D = !use3D;
+  keep('chess.view', use3D ? '3d' : '2d');
+  render();
+}
+
+// 3D 판 만들기 (처음 한 번만). 다 만들어지면 화면을 다시 그림
+async function ensure3D() {
+  if (board3D || loading3D) return;
+  loading3D = true;
+  try {
+    const { createBoard3D } = await import('./three/board3d');
+    board3D = await createBoard3D(G.onSquareClick, theme3D);
+    board3D.setView(view3D);
+  } catch (err) {
+    console.error(err);
+    error3D = '3D를 켤 수 없어요. 이 기기나 브라우저가 3D 그래픽(WebGL)을 지원하지 않는 것 같아요.';
+    use3D = false;
+  }
+  loading3D = false;
   render();
 }
 
@@ -125,10 +165,26 @@ function renderPlay(app: HTMLElement) {
   middle.className = 'middle';
 
   // 내가 흑이면 판을 뒤집어서 내 기물이 아래에 오게 (구경할 때는 항상 백이 아래)
-  const boardEl = drawBoard(G.game, {
-    flipped: !watching && G.playerColor === 'b', lastMove: G.lastMove, selected: G.selected, targets: G.targets, onClick: G.onSquareClick,
-  });
-  middle.appendChild(boardEl);
+  const flipped = !watching && G.playerColor === 'b';
+  if (use3D && board3D) {
+    // 3D 판: 같은 상자를 계속 다시 붙여 씀 (새로 만들면 느려서)
+    board3D.update({
+      game: G.game, lastMove: G.lastMove, selected: G.selected, targets: G.targets, flipped,
+      inCheck: inCheck(G.game, G.game.turn),
+    });
+    middle.appendChild(board3D.element);
+  } else if (use3D) {
+    // 3D를 불러오는 중
+    const wait = document.createElement('div');
+    wait.className = 'board3d board3d-loading';
+    wait.textContent = '3D 판을 불러오는 중…';
+    middle.appendChild(wait);
+    ensure3D();
+  } else {
+    middle.appendChild(drawBoard(G.game, {
+      flipped, lastMove: G.lastMove, selected: G.selected, targets: G.targets, onClick: G.onSquareClick,
+    }));
+  }
 
   const side = document.createElement('div');
   side.className = 'side';
@@ -147,6 +203,31 @@ function renderPlay(app: HTMLElement) {
   buttons.appendChild(makeButton('다시 시작', G.restart));
   buttons.appendChild(makeButton('기보 저장', downloadPGN, G.moveTexts.length === 0));
   app.appendChild(buttons);
+
+  // ④ 보기: 2D/3D 전환, (3D일 때) 테마·시점
+  const viewRow = document.createElement('div');
+  viewRow.className = 'controls';
+  viewRow.appendChild(makeButton(use3D ? '2D로 보기' : '3D로 보기', toggle3D));
+  if (use3D) {
+    viewRow.appendChild(makeSelect('opponent', THEME_LIST, theme3D, v => {
+      theme3D = v;
+      keep('chess.theme', v);
+      board3D?.setTheme(v);
+      render();
+    }));
+    viewRow.appendChild(makeButton(view3D === 'angle' ? '위에서 보기' : '비스듬히 보기', () => {
+      view3D = view3D === 'angle' ? 'top' : 'angle';
+      board3D?.setView(view3D);
+      render();
+    }));
+  }
+  app.appendChild(viewRow);
+  if (error3D) {
+    const err = document.createElement('div');
+    err.className = 'persona-info';
+    err.textContent = error3D;
+    app.appendChild(err);
+  }
 
   if (G.pendingPromotion) app.appendChild(promotionPicker());
 

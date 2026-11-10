@@ -1,0 +1,435 @@
+// ---------- 3D 판 (게임과 연결된 것) ----------
+// 2D 판과 똑같은 정보(판 상태, 마지막 수, 고른 칸, 둘 수 있는 칸)를 받아서 3D로 그림
+// 칸을 누르면 onSquareClick(칸 번호)을 불러서 game.ts가 처리하게 함
+// 수를 두면 기물이 미끄러지듯 움직이고(나이트는 뛰어넘음), 잡힌 기물은 작아지며 사라짐
+//
+// 장면 꾸미기(조명, 나뭇결, 모델, 테마)는 원래 scene3d.ts에 있던 코드를 그대로 옮겨 온 것
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { cloneGame, type GameState } from '../board';
+import { makeMove, type Move } from '../moves';
+import { makePiece, type PieceKind } from './pieces';
+import { CLASSIC, THEMES, type Theme, type WoodLook } from './themes';
+import { loadModelSet, type ModelSet } from './modelSet';
+
+export interface Board3DState {
+  game: GameState;
+  lastMove: Move | null;
+  selected: number | null;
+  targets: number[];
+  flipped: boolean; // true면 흑 쪽에서 봄
+  inCheck: boolean; // 둘 차례인 쪽 킹이 체크당했는지
+}
+
+export type CameraView = 'angle' | 'top'; // 비스듬히 / 위에서
+
+export interface Board3D {
+  element: HTMLElement;                 // 화면에 붙일 상자 (안에 3D 그림이 있음)
+  update(state: Board3DState): void;    // 게임 상태가 바뀔 때마다 부름
+  setTheme(id: string): void;
+  setView(view: CameraView): void;
+  dispose(): void;
+}
+
+// 모델 파일은 한 번만 불러옴 (테마를 바꾸거나 3D를 다시 켜도 재사용)
+let modelSetPromise: Promise<ModelSet | null> | null = null;
+function getModelSet() {
+  if (!modelSetPromise) modelSetPromise = loadModelSet();
+  return modelSetPromise;
+}
+
+// 칸 좌표 → 3D 위치. file(왼→오 0~7), rank(흰 쪽 0 → 검은 쪽 7)
+// x = file - 3.5, z = 3.5 - rank (흰 쪽이 카메라 가까이)
+function squarePosition(square: number): THREE.Vector3 {
+  const file = square % 8, rank = Math.floor(square / 8);
+  return new THREE.Vector3(file - 3.5, 0, 3.5 - rank);
+}
+
+// 판 배치를 글자 하나로 (같은 배치인지 비교용)
+function boardKey(g: GameState): string {
+  return g.board.map(p => (p ? p.color + p.type : '..')).join('');
+}
+
+const MOVE_TIME = 320;    // 기물이 움직이는 시간(ms)
+const JUMP_HEIGHT = 0.6;  // 나이트가 뛰어오르는 높이
+
+export async function createBoard3D(onSquareClick: (index: number) => void, themeId = 'classic'): Promise<Board3D> {
+  const modelSet = await getModelSet();
+  const touch = matchMedia('(pointer: coarse)').matches; // 휴대폰·태블릿이면 그림자 품질을 낮춤
+
+  // ── 그리는 장치 ──
+  const element = document.createElement('div');
+  element.className = 'board3d';
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // 너무 선명하면 느려서 최대 2배
+  renderer.toneMapping = THREE.ACESFilmicToneMapping; // 영화 같은 색 보정
+  renderer.toneMappingExposure = 0.9;
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFShadowMap;
+  element.appendChild(renderer.domElement);
+
+  // ── 장면, 카메라, 조명 (테마와 상관없는 부분) ──
+  const scene = new THREE.Scene();
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture; // 가상의 방 풍경 반사
+
+  const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 100);
+  const controls = new OrbitControls(camera, renderer.domElement);
+  controls.target.set(0, 0, 0);
+  controls.enableDamping = true;            // 손을 떼도 부드럽게 멈춤
+  controls.maxPolarAngle = Math.PI * 0.47;  // 판 아래로는 못 내려가게
+  controls.minDistance = 5;
+  controls.maxDistance = 22;
+  controls.enablePan = false;               // 판이 화면 밖으로 밀려나지 않게
+
+  const ambient = new THREE.AmbientLight(0xffffff, 0.15);
+  scene.add(ambient);
+  const sun = new THREE.DirectionalLight(0xffffff, 2);
+  sun.position.set(-4, 8, 3);
+  sun.castShadow = true;
+  sun.shadow.mapSize.set(touch ? 1024 : 2048, touch ? 1024 : 2048);
+  Object.assign(sun.shadow.camera, { left: -6, right: 6, top: 6, bottom: -6 });
+  sun.shadow.bias = -0.0005;
+  sun.shadow.radius = 4;
+  scene.add(sun);
+
+  // 테마에 따라 바뀌는 것들을 담는 묶음 (테마를 바꾸면 통째로 새로 만듦)
+  let themeGroup = new THREE.Group();
+  scene.add(themeGroup);
+  let theme: Theme = CLASSIC;
+  let whiteMat = new THREE.MeshPhysicalMaterial();
+  let blackMat = new THREE.MeshPhysicalMaterial();
+
+  // ── 나뭇결 그림 (코드로 그림, 파일 필요 없음) ──
+  function woodTexture(look: WoodLook): THREE.CanvasTexture {
+    const size = 256;
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d')!;
+    ctx.fillStyle = look.base;
+    ctx.fillRect(0, 0, size, size);
+    ctx.strokeStyle = look.grain;
+    for (let i = 0; i < 70; i++) {
+      const y0 = Math.random() * size;
+      const amp = 2 + Math.random() * 5;
+      const freq = 0.01 + Math.random() * 0.02;
+      const phase = Math.random() * Math.PI * 2;
+      ctx.globalAlpha = 0.08 + Math.random() * 0.25;
+      ctx.lineWidth = 0.5 + Math.random() * 2;
+      ctx.beginPath();
+      for (let x = 0; x <= size; x += 4) {
+        const y = y0 + Math.sin(x * freq + phase) * amp;
+        if (x === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+    }
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    return tex;
+  }
+
+  // 칸마다 나뭇결이 조금씩 다르게: 같은 그림의 다른 부분을 잘라 씀
+  function woodMaterial(base: THREE.CanvasTexture, rotate: boolean): THREE.MeshPhysicalMaterial {
+    const tex = base.clone();
+    tex.repeat.set(0.5, 0.5);
+    tex.offset.set(Math.random() * 0.5, Math.random() * 0.5);
+    if (rotate) { tex.center.set(0.5, 0.5); tex.rotation = Math.PI / 2; }
+    tex.needsUpdate = true;
+    return new THREE.MeshPhysicalMaterial({ map: tex, roughness: 0.45, clearcoat: 0.4, clearcoatRoughness: 0.3 });
+  }
+
+  // ── 테마 적용: 배경, 조명 세기, 판, 바닥, 기물 재질 ──
+  function applyTheme(id: string) {
+    theme = THEMES.find(t => t.id === id) ?? CLASSIC;
+    scene.remove(themeGroup);
+    themeGroup = new THREE.Group();
+    scene.add(themeGroup);
+    scene.background = new THREE.Color(theme.background);
+    scene.environmentIntensity = theme.envIntensity;
+    ambient.intensity = theme.ambient;
+    sun.color.set(theme.sunColor);
+    sun.intensity = theme.sunIntensity;
+
+    let boardBottom = -0.37;
+    if (theme.modelMaterials && modelSet) {
+      const board = modelSet.makeBoard(); // 모델의 원래 판 (대리석)
+      themeGroup.add(board);
+      boardBottom = new THREE.Box3().setFromObject(board).min.y;
+    } else {
+      const lightWood = woodTexture(theme.lightSquare);
+      const darkWood = woodTexture(theme.darkSquare);
+      const squareGeo = new THREE.BoxGeometry(1, 0.1, 1);
+      for (let s = 0; s < 64; s++) {
+        const file = s % 8, rank = Math.floor(s / 8);
+        const isLight = (file + rank) % 2 === 1; // a1은 어두운 칸
+        const sq = new THREE.Mesh(squareGeo, woodMaterial(isLight ? lightWood : darkWood, (file + rank) % 2 === 0));
+        sq.position.copy(squarePosition(s));
+        sq.position.y = -0.05; // 윗면이 높이 0
+        sq.receiveShadow = true;
+        themeGroup.add(sq);
+      }
+      const frameTex = woodTexture(theme.frame);
+      frameTex.repeat.set(3, 3);
+      const frame = new THREE.Mesh(new THREE.BoxGeometry(9, 0.36, 9),
+        new THREE.MeshPhysicalMaterial({ map: frameTex, roughness: 0.4, clearcoat: 0.6, clearcoatRoughness: 0.2 }));
+      frame.position.y = -0.19;
+      frame.receiveShadow = frame.castShadow = true;
+      themeGroup.add(frame);
+    }
+    const floor = new THREE.Mesh(new THREE.PlaneGeometry(60, 60),
+      new THREE.MeshStandardMaterial({ color: theme.background, roughness: 1 }));
+    floor.rotation.x = -Math.PI / 2;
+    floor.position.y = boardBottom - 0.001;
+    floor.receiveShadow = true;
+    themeGroup.add(floor);
+
+    whiteMat = new THREE.MeshPhysicalMaterial(theme.whitePiece);
+    blackMat = new THREE.MeshPhysicalMaterial(theme.blackPiece);
+    if (modelSet) {
+      whiteMat.normalMap = modelSet.normalMap(true); // 모델의 조각 자국을 테마 재질에도 빌려 씀
+      blackMat.normalMap = modelSet.normalMap(false);
+    }
+    // 기물은 재질이 바뀌어야 하니 전부 새로 만듦
+    for (const [sq, obj] of pieces) { piecesGroup.remove(obj); pieces.delete(sq); }
+    if (current) syncPieces(current.game);
+  }
+
+  // ── 기물 ──
+  const piecesGroup = new THREE.Group();
+  scene.add(piecesGroup);
+  const pieces = new Map<number, THREE.Object3D>(); // 칸 번호 → 그 칸의 기물 (userData.code = 'wp' 같은 글자)
+
+  function createPiece(code: string): THREE.Object3D {
+    const isWhite = code[0] === 'w';
+    const kind = code[1] as PieceKind;
+    let obj: THREE.Group;
+    if (modelSet) {
+      const mat = theme.modelMaterials ? undefined : isWhite ? whiteMat : blackMat;
+      obj = modelSet.makePiece(kind, isWhite, mat);
+    } else {
+      obj = makePiece(kind, isWhite ? whiteMat : blackMat);
+      obj.rotation.y = isWhite ? Math.PI / 2 : -Math.PI / 2; // 나이트 머리가 상대 쪽을 보게
+    }
+    obj.userData.code = code;
+    return obj;
+  }
+
+  // 판 상태와 3D 기물을 맞춤 (움직임 없이 바로)
+  function syncPieces(game: GameState) {
+    for (let s = 0; s < 64; s++) {
+      const p = game.board[s];
+      const code = p ? p.color + p.type : null;
+      const have = pieces.get(s);
+      if (have && have.userData.code === code) { have.position.copy(squarePosition(s)); have.scale.setScalar(1); continue; }
+      if (have) { piecesGroup.remove(have); pieces.delete(s); }
+      if (code) {
+        const obj = createPiece(code);
+        obj.position.copy(squarePosition(s));
+        piecesGroup.add(obj);
+        pieces.set(s, obj);
+      }
+    }
+  }
+
+  // ── 움직임 (애니메이션) ──
+  interface Tween { obj: THREE.Object3D; from: THREE.Vector3; to: THREE.Vector3; start: number; jump: boolean; vanish: boolean }
+  let tweens: Tween[] = [];
+  let afterTweens: (() => void) | null = null;
+
+  function animateMove(prev: GameState, move: Move, game: GameState) {
+    const now = performance.now();
+    const moving = pieces.get(move.from);
+    if (!moving) { syncPieces(game); return; }
+    // 잡히는 기물 (앙파상이면 도착 칸이 아니라 옆 칸)
+    const piece = prev.board[move.from]!;
+    let capturedSq: number | null = prev.board[move.to] ? move.to : null;
+    if (piece.type === 'p' && move.to === prev.enPassant) capturedSq = (Math.floor(move.from / 8)) * 8 + (move.to % 8);
+    if (capturedSq !== null) {
+      const victim = pieces.get(capturedSq);
+      if (victim) {
+        pieces.delete(capturedSq);
+        tweens.push({ obj: victim, from: victim.position.clone(), to: victim.position.clone(), start: now, jump: false, vanish: true });
+      }
+    }
+    pieces.delete(move.from);
+    pieces.set(move.to, moving);
+    tweens.push({ obj: moving, from: squarePosition(move.from), to: squarePosition(move.to), start: now,
+      jump: piece.type === 'n', vanish: false });
+    // 캐슬링이면 룩도 같이
+    if (piece.type === 'k' && Math.abs((move.to % 8) - (move.from % 8)) === 2) {
+      const rank = Math.floor(move.from / 8);
+      const [rf, rt] = move.to % 8 === 6 ? [rank * 8 + 7, rank * 8 + 5] : [rank * 8, rank * 8 + 3];
+      const rook = pieces.get(rf);
+      if (rook) {
+        pieces.delete(rf);
+        pieces.set(rt, rook);
+        tweens.push({ obj: rook, from: squarePosition(rf), to: squarePosition(rt), start: now, jump: false, vanish: false });
+      }
+    }
+    // 다 움직인 뒤 판 상태와 한 번 더 맞춤 (프로모션이면 여기서 폰이 퀸 등으로 바뀜)
+    afterTweens = () => syncPieces(game);
+  }
+
+  function stepTweens(now: number) {
+    if (tweens.length === 0) return;
+    let allDone = true;
+    for (const t of tweens) {
+      const k = Math.min(1, (now - t.start) / MOVE_TIME);
+      const ease = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2; // 천천히 출발 → 빨리 → 천천히 도착
+      if (t.vanish) {
+        t.obj.scale.setScalar(Math.max(0.001, 1 - ease)); // 작아지며 사라짐
+      } else {
+        t.obj.position.lerpVectors(t.from, t.to, ease);
+        t.obj.position.y = t.jump ? Math.sin(Math.PI * ease) * JUMP_HEIGHT : 0;
+      }
+      if (k < 1) allDone = false;
+    }
+    if (allDone) {
+      for (const t of tweens) if (t.vanish) piecesGroup.remove(t.obj);
+      tweens = [];
+      const fn = afterTweens;
+      afterTweens = null;
+      fn?.();
+    }
+  }
+
+  // 진행 중인 움직임을 바로 끝냄 (무르기·다시 시작처럼 판이 갑자기 바뀔 때)
+  function finishTweens() {
+    if (tweens.length === 0) return;
+    for (const t of tweens) {
+      if (t.vanish) piecesGroup.remove(t.obj);
+      else t.obj.position.copy(t.to);
+    }
+    tweens = [];
+    afterTweens = null;
+  }
+
+  // ── 칸 표시: 마지막 수, 고른 칸, 둘 수 있는 칸, 체크 ──
+  const marks = new THREE.Group();
+  scene.add(marks);
+  const flatSquare = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2);
+  const dotGeo = new THREE.CircleGeometry(0.15, 32).rotateX(-Math.PI / 2);
+  const ringGeo = new THREE.RingGeometry(0.38, 0.47, 48).rotateX(-Math.PI / 2);
+  const markMat = (color: number, opacity: number) =>
+    new THREE.MeshBasicMaterial({ color, transparent: true, opacity, depthWrite: false });
+  const LAST = markMat(0xc8e05a, 0.45), SELECTED = markMat(0xf2d34a, 0.6),
+    TARGET = markMat(0x1a1a1a, 0.35), CHECK = markMat(0xff3b30, 0.55);
+
+  function drawMarks(state: Board3DState) {
+    marks.clear();
+    const add = (geo: THREE.BufferGeometry, mat: THREE.Material, sq: number) => {
+      const m = new THREE.Mesh(geo, mat);
+      m.position.copy(squarePosition(sq));
+      m.position.y = 0.004; // 판 바로 위
+      m.renderOrder = 1;
+      marks.add(m);
+    };
+    if (state.lastMove) { add(flatSquare, LAST, state.lastMove.from); add(flatSquare, LAST, state.lastMove.to); }
+    if (state.selected !== null) add(flatSquare, SELECTED, state.selected);
+    for (const t of state.targets) add(state.game.board[t] ? ringGeo : dotGeo, TARGET, t);
+    // 체크당한 킹 칸을 빨갛게
+    const g = state.game;
+    const king = g.board.findIndex(p => p && p.type === 'k' && p.color === g.turn);
+    if (king >= 0 && state.inCheck) add(flatSquare, CHECK, king);
+  }
+
+  // ── 카메라 ──
+  let flipped = false;
+  let view: CameraView = 'angle';
+  function placeCamera() {
+    const side = flipped ? -1 : 1; // 흑 쪽에서 보면 반대편
+    if (view === 'top') camera.position.set(0, 14, 0.01 * side);
+    else camera.position.set(0, 10.5, 11.8 * side); // 판 전체가 들어오게 조금 멀리서
+    camera.up.set(0, 1, 0);
+    controls.update();
+  }
+  placeCamera();
+
+  // ── 누르기: 끌어서 돌리는 것과 구별 (손가락·마우스가 거의 안 움직였으면 누른 것) ──
+  const raycaster = new THREE.Raycaster();
+  const boardPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+  let downAt: { x: number; y: number } | null = null;
+  renderer.domElement.addEventListener('pointerdown', e => { downAt = { x: e.clientX, y: e.clientY }; });
+  renderer.domElement.addEventListener('pointerup', e => {
+    if (!downAt) return;
+    const moved = Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y);
+    downAt = null;
+    if (moved > 6) return; // 돌린 것
+    const rect = renderer.domElement.getBoundingClientRect();
+    const ndc = new THREE.Vector2(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1);
+    raycaster.setFromCamera(ndc, camera);
+    const hit = new THREE.Vector3();
+    if (!raycaster.ray.intersectPlane(boardPlane, hit)) return;
+    const file = Math.floor(hit.x + 4), rank = Math.floor(4 - hit.z);
+    if (file < 0 || file > 7 || rank < 0 || rank > 7) return;
+    onSquareClick(rank * 8 + file);
+  });
+
+  // ── 크기: 상자 크기가 바뀌면 맞춤 ──
+  const resize = () => {
+    const w = element.clientWidth, h = element.clientHeight;
+    if (w === 0 || h === 0) return;
+    renderer.setSize(w, h, false);
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+  };
+  const observer = new ResizeObserver(resize);
+  observer.observe(element);
+
+  // ── 그리기: 화면에 붙어 있을 때만 (다른 탭이면 쉼) ──
+  renderer.setAnimationLoop(now => {
+    if (!element.isConnected) return;
+    stepTweens(now);
+    controls.update();
+    renderer.render(scene, camera);
+  });
+
+  // ── 바깥에서 부르는 함수 ──
+  let current: Board3DState | null = null;
+  applyTheme(themeId);
+
+  return {
+    element,
+    update(state) {
+      const prev = current;
+      if (state.flipped !== flipped) { flipped = state.flipped; placeCamera(); }
+      // 새 수 하나가 둬진 거면 움직임으로, 아니면(무르기·다시 시작) 바로 맞춤
+      const newMove = prev !== null && state.lastMove !== null && state.lastMove !== prev.lastMove;
+      let animated = false;
+      // (무르기를 하면 lastMove가 예전 수로 바뀌는데, 그 수는 지금 판에서 둘 수 없으니 먼저 확인)
+      const mover = newMove ? prev!.game.board[state.lastMove!.from] : null;
+      if (newMove && mover && mover.color === prev!.game.turn) {
+        const test = cloneGame(prev!.game);
+        makeMove(test, state.lastMove!);
+        const sameBoard = test.board.every((p, i) => {
+          const q = state.game.board[i];
+          return (p?.color === q?.color) && (p?.type === q?.type);
+        });
+        if (sameBoard) { finishTweens(); animateMove(prev!.game, state.lastMove!, state.game); animated = true; }
+      }
+      if (!animated) {
+        // 움직이는 중에 화면만 다시 그려진 거면(판은 그대로) 움직임을 끊지 않음
+        const sameAsBefore = prev !== null && boardKey(prev.game) === boardKey(state.game);
+        if (!(sameAsBefore && tweens.length > 0)) {
+          finishTweens();
+          syncPieces(state.game);
+        }
+      }
+      current = { ...state, game: cloneGame(state.game) };
+      drawMarks(current);
+    },
+    setTheme(id) { finishTweens(); applyTheme(id); },
+    setView(v) { view = v; placeCamera(); },
+    dispose() {
+      renderer.setAnimationLoop(null);
+      observer.disconnect();
+      controls.dispose();
+      renderer.dispose();
+      element.remove();
+    },
+  };
+}

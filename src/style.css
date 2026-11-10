@@ -320,3 +320,24 @@ body {
   cursor: pointer;
   white-space: nowrap;
 }
+
+/* ---------- 3D 판 ---------- */
+/* 2D 판과 같은 크기의 상자 안에 3D 그림 */
+.board3d {
+  width: calc(var(--sq) * 8 + 8px);
+  height: calc(var(--sq) * 8 + 8px);
+  border-radius: 6px;
+  overflow: hidden;
+  position: relative;
+  touch-action: none; /* 휴대폰에서 판을 돌릴 때 화면이 같이 스크롤되지 않게 */
+  flex-shrink: 0;
+}
+.board3d canvas { display: block; width: 100%; height: 100%; }
+.board3d-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #333;
+  color: #aaa;
+  font-family: sans-serif;
+}
