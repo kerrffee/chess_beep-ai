@@ -1,5 +1,12 @@
+/* 칸 한 변 크기: 넓은 화면에선 64px, 좁은 화면(휴대폰)에선 화면 너비에 맞게 줄어듦 */
+:root {
+  --sq: min(64px, calc((100vw - 24px) / 8));
+}
+
 body {
   margin: 0;
+  padding: 12px 0;
+  box-sizing: border-box;
   min-height: 100vh;
   display: flex;
   align-items: center;
@@ -9,8 +16,8 @@ body {
 
 .board {
   display: grid;
-  grid-template-columns: repeat(8, 64px);
-  grid-template-rows: repeat(8, 64px);
+  grid-template-columns: repeat(8, var(--sq));
+  grid-template-rows: repeat(8, var(--sq));
   border: 4px solid #444;
 }
 
@@ -18,9 +25,10 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 48px;
+  font-size: calc(var(--sq) * 0.75);
   font-family: "Apple Symbols", "Segoe UI Symbol", sans-serif;
   user-select: none;
+  -webkit-tap-highlight-color: transparent; /* 휴대폰에서 누를 때 생기는 파란 깜빡임 없애기 */
 }
 
 .light { background: #f0d9b5; }
@@ -53,8 +61,8 @@ body {
 .square.target::after {
   content: '';
   position: absolute;
-  width: 20px;
-  height: 20px;
+  width: calc(var(--sq) * 0.3);
+  height: calc(var(--sq) * 0.3);
   border-radius: 50%;
   background: rgba(0, 0, 0, 0.25);
 }
@@ -106,9 +114,9 @@ body {
   gap: 8px;
 }
 .promo-piece {
-  width: 64px;
-  height: 64px;
-  font-size: 48px;
+  width: var(--sq);
+  height: var(--sq);
+  font-size: calc(var(--sq) * 0.75);
   font-family: "Apple Symbols", "Segoe UI Symbol", sans-serif;
   border: none;
   border-radius: 8px;
@@ -147,7 +155,7 @@ body {
 /* 기보: 판 높이에 맞추고, 길어지면 스크롤 */
 .moves {
   width: 190px;
-  height: 520px;
+  height: calc(var(--sq) * 8 + 8px); /* 판 높이와 같게 */
   overflow-y: auto;
   background: #333;
   border-radius: 6px;
@@ -163,3 +171,13 @@ body {
   line-height: 1.6;
 }
 .move-num { color: #888; }
+
+/* ---------- 휴대폰처럼 좁은 화면 ---------- */
+/* 판 옆에 기보를 둘 자리가 없으면, 기보를 판 아래로 내리고 판 너비에 맞춤 */
+@media (max-width: 760px) {
+  body { align-items: flex-start; }
+  .middle { flex-direction: column; align-items: center; gap: 10px; }
+  .moves { width: calc(var(--sq) * 8 + 8px); height: 96px; }
+  .info { font-size: 18px; }
+  .controls { flex-wrap: wrap; justify-content: center; }
+}

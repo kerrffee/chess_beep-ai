@@ -3,10 +3,13 @@ import { initialGame, fromFEN, sq, cloneGame, type Color, type GameState, type P
 import { movesFrom, inCheck, gameStatus, makeMove, legalMoves, positionKey, type Move } from './moves';
 import type { AIKind } from './ai';
 
-const SYMBOLS: Record<string, string> = {
+// 끝에 붙인 \uFE0E = "그림 문자(이모지) 말고 글자 모양으로 그려 줘"
+// 이게 없으면 아이폰 등에서 흑 폰(♟)이 색깔 있는 이모지로 나옴
+const TEXT_STYLE = '\uFE0E';
+const SYMBOLS: Record<string, string> = Object.fromEntries(Object.entries({
   wk: '♔', wq: '♕', wr: '♖', wb: '♗', wn: '♘', wp: '♙',
   bk: '♚', bq: '♛', br: '♜', bb: '♝', bn: '♞', bp: '♟',
-};
+}).map(([key, symbol]) => [key, symbol + TEXT_STYLE]));
 
 // 상대 고르기: 사람(둘이서) 또는 AI
 type Opponent = 'human' | AIKind;
