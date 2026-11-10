@@ -152,10 +152,20 @@ body {
   align-items: flex-start;
 }
 
-/* 기보: 판 높이에 맞추고, 길어지면 스크롤 */
-.moves {
+/* 판 옆: 기보 + 형세 그래프 (합쳐서 판 높이) */
+.side {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
   width: 190px;
-  height: calc(var(--sq) * 8 + 8px); /* 판 높이와 같게 */
+  height: calc(var(--sq) * 8 + 8px);
+}
+
+/* 기보: 남는 높이를 다 쓰고, 길어지면 스크롤 */
+.moves {
+  width: 100%;
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
   background: #333;
   border-radius: 6px;
@@ -177,7 +187,8 @@ body {
 @media (max-width: 760px) {
   body { align-items: flex-start; }
   .middle { flex-direction: column; align-items: center; gap: 10px; }
-  .moves { width: calc(var(--sq) * 8 + 8px); height: 96px; }
+  .side { width: calc(var(--sq) * 8 + 8px); height: auto; }
+  .moves { height: 96px; flex: none; }
   .info { font-size: 18px; }
   .controls { flex-wrap: wrap; justify-content: center; }
 }
@@ -213,3 +224,18 @@ body {
   color: #8a5a2b;
   white-space: nowrap;
 }
+
+/* 형세 그래프 */
+.graph {
+  background: #333;
+  border-radius: 6px;
+  padding: 6px 8px 4px;
+  box-sizing: border-box;
+}
+.graph svg { width: 100%; height: 64px; display: block; }
+.graph-white { fill: #4a4a4a; }
+.graph-black { fill: #262626; }
+.graph-mid { stroke: #777; stroke-width: 0.6; }
+.graph-line { fill: none; stroke: #e8c66a; stroke-width: 1.6; vector-effect: non-scaling-stroke; }
+.graph-dot { fill: #e8c66a; }
+.graph-label { color: #888; font-size: 11px; font-family: sans-serif; margin-top: 2px; }
