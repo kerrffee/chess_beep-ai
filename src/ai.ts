@@ -2,11 +2,11 @@ import { cloneGame, type GameState, type PieceType } from './board';
 import { legalMoves, makeMove, unmakeMove, inCheck, positionKey, insufficientMaterial, type Move } from './moves';
 import { computeHash, hashFromKey, hashHi, hashLo } from './zobrist';
 
-export type AIKind = 'random' | 'greedy' | 'minimax';
+import type { Personality } from './personality';
 
 // 기물 가치 (폰 = 100 단위. 킹은 잡을 일이 없으니 0)
 // 100 단위인 이유: 좋은 칸 보너스를 "폰의 0.1개 = 10점"처럼 정수로 섞으려고
-const VALUE: Record<PieceType, number> = { p: 100, n: 300, b: 300, r: 500, q: 900, k: 0 };
+export const VALUE: Record<PieceType, number> = { p: 100, n: 300, b: 300, r: 500, q: 900, k: 0 };
 
 // ---------- 기물별 좋은 칸 표 ----------
 // 백 입장에서, 눈에 보이는 체스판 모양 그대로 적음:
@@ -175,7 +175,7 @@ const MATE = 100000; // 체크메이트 점수. 어떤 기물 점수보다도 �
 
 // ---------- 평가함수 v3: 위치 판단 항목 ----------
 // 기물 값과 좋은 칸 표만으로는 못 보는 것들. 숫자는 전부 "폰 1개 = 100" 기준
-// 나중에 성격마다 이 숫자들을 바꿔서 쓸 수 있게 한곳에 모아 둠
+// 성격마다 이 숫자들을 바꿔서 씀 (personality.ts)
 export const EVAL_WEIGHTS = {
   doubledPawn: 15,     // 같은 세로줄에 내 폰이 2개 이상: 서로 막고, 지켜 주지 못함 (1개 더 있을 때마다 −)
   isolatedPawn: 15,    // 양옆 세로줄에 내 폰이 없음: 다른 폰이 지켜 줄 수 없음
@@ -186,13 +186,29 @@ export const EVAL_WEIGHTS = {
   kingShield1: 10,     // 킹 바로 앞 칸(3개 세로줄)의 내 폰 하나당 (중반에만)
   kingShield2: 5,      // 킹 두 칸 앞의 내 폰 하나당 (중반에만)
   kingOpenFile: 15,    // 킹 앞 3개 세로줄 중 내 폰이 없는 줄 하나당 − (중반에만)
+  kingAttack: 0,       // 상대 킹 2칸 안에 있는 내 기물(폰·킹 제외) 하나당 (중반에만). 돌격대장용
+  tradeAversion: 0,    // 판에 남은 기물(폰·킹 제외, 양쪽 모두) 하나당. 크면 교환을 싫어함. 겁쟁이용
 };
+export type EvalWeights = typeof EVAL_WEIGHTS;
+
+// ---------- 성격 적용 ----------
+// AI 쪽 색에는 성격의 기물 값·가중치를, 상대 색에는 기본값을 씀
+// (예: 퀸 사랑꾼은 "내" 퀸만 아주 비싸게 봄 → 퀸끼리 바꾸는 것도 손해로 느낌)
+const activeValues: Record<'w' | 'b', Record<PieceType, number>> = { w: VALUE, b: VALUE };
+const activeWeights: Record<'w' | 'b', EvalWeights> = { w: EVAL_WEIGHTS, b: EVAL_WEIGHTS };
+
+function applyPersonality(p: Personality | null, aiColor: 'w' | 'b') {
+  const enemy = aiColor === 'w' ? 'b' : 'w';
+  activeValues[enemy] = VALUE;
+  activeWeights[enemy] = EVAL_WEIGHTS;
+  activeValues[aiColor] = { ...VALUE, ...(p?.values ?? {}) };
+  activeWeights[aiColor] = { ...EVAL_WEIGHTS, ...(p?.weights ?? {}) };
+}
 
 // 평가함수 v3: (기물 값 + 그 칸의 보너스) + 위치 판단 항목, 백 − 흑 (백 입장 점수)
 // +면 백이 유리, −면 흑이 유리
 // 킹 표와 킹 안전은 게임 단계(중반 ↔ 끝판)에 따라 섞어서 씀
 export function evaluate(game: GameState): number {
-  const W = EVAL_WEIGHTS;
   const phase = gamePhase(game);
   const b = game.board;
   let score = 0;
@@ -201,14 +217,18 @@ export function evaluate(game: GameState): number {
   const pawnsOnFile = { w: [0, 0, 0, 0, 0, 0, 0, 0], b: [0, 0, 0, 0, 0, 0, 0, 0] };
   const bishops = { w: 0, b: 0 };
   const king = { w: -1, b: -1 };
+  let pieces = 0; // 판에 남은 기물 수 (폰·킹 제외, 양쪽 모두)
   for (let s = 0; s < 64; s++) {
     const p = b[s];
     if (!p) continue;
-    const v = VALUE[p.type] + pstBonus(p.type, p.color, s, phase);
+    const v = activeValues[p.color][p.type] + pstBonus(p.type, p.color, s, phase);
     score += p.color === 'w' ? v : -v;
     if (p.type === 'p') pawnsOnFile[p.color][s % 8]++;
-    else if (p.type === 'b') bishops[p.color]++;
     else if (p.type === 'k') king[p.color] = s;
+    else {
+      pieces++;
+      if (p.type === 'b') bishops[p.color]++;
+    }
   }
 
   // 백 기준으로 계산하고, 흑은 같은 계산을 거꾸로 해서 뺌
@@ -216,7 +236,10 @@ export function evaluate(game: GameState): number {
     const sign = color === 'w' ? 1 : -1;
     const enemy = color === 'w' ? 'b' : 'w';
     const mine = pawnsOnFile[color], theirs = pawnsOnFile[enemy];
+    const W = activeWeights[color];
+    const enemyKing = king[enemy];
     let s = 0;
+    let attackers = 0; // 상대 킹 2칸 안에 있는 내 기물 수
 
     // 폰 구조: 겹친 폰, 고립된 폰
     for (let f = 0; f < 8; f++) {
@@ -247,11 +270,21 @@ export function evaluate(game: GameState): number {
           // 끝판일수록 통과한 폰이 중요 → 중반 1배 ~ 끝판 2배
           s += Math.round(W.passedPawn[advanced] * (2 * MAX_PHASE - phase) / MAX_PHASE);
         }
-      } else if (p.type === 'r') {
-        if (mine[f] === 0 && theirs[f] === 0) s += W.rookOpenFile;
-        else if (mine[f] === 0) s += W.rookHalfOpen;
+      } else if (p.type !== 'k') {
+        if (p.type === 'r') {
+          if (mine[f] === 0 && theirs[f] === 0) s += W.rookOpenFile;
+          else if (mine[f] === 0) s += W.rookHalfOpen;
+        }
+        // 상대 킹과 가로·세로 모두 2칸 이내인지
+        if (W.kingAttack !== 0 && enemyKing >= 0 &&
+            Math.abs(f - enemyKing % 8) <= 2 && Math.abs(r - Math.floor(enemyKing / 8)) <= 2) attackers++;
       }
     }
+
+    // 킹 공격 (중반일수록 중요)
+    if (attackers > 0) s += Math.round(W.kingAttack * attackers * phase / MAX_PHASE);
+    // 교환 싫어함: 판에 기물이 많이 남아 있을수록 좋다고 느낌
+    if (W.tradeAversion !== 0) s += W.tradeAversion * pieces;
 
     // 비숍 두 개
     if (bishops[color] >= 2) s += W.bishopPair;
@@ -619,6 +652,7 @@ function startSearch(game: GameState, history?: string[]) {
 // 알파-베타로 고른 가장 좋은 수 (깊이 고정, 테스트용). 같은 점수의 수가 여러 개면 그중 아무거나
 export function alphaBetaMove(original: GameState, depth: number, history?: string[]): Move {
   const game = cloneGame(original); // 탐색은 복사본 위에서
+  applyPersonality(null, game.turn); // 테스트는 항상 기본 성격으로
   startSearch(game, history);
   return pickRandom(searchRoot(game, depth, orderedMoves(game)).bestMoves);
 }
@@ -626,6 +660,7 @@ export function alphaBetaMove(original: GameState, depth: number, history?: stri
 // 테스트용: depth수 앞까지 본 점수 (백 기준)
 export function searchScore(original: GameState, depth: number, history?: string[]): number {
   const game = cloneGame(original);
+  applyPersonality(null, game.turn);
   startSearch(game, history);
   return searchRoot(game, depth, orderedMoves(game)).best;
 }
@@ -667,9 +702,40 @@ export function iterativeMove(original: GameState, timeLimit: number, history?: 
   return pickRandom(result.bestMoves);
 }
 
-// history: 실제 게임 장면 기록 (반복 무승부 판단용). timeLimit: 생각하는 AI가 쓸 시간(ms)
-export function chooseMove(kind: AIKind, game: GameState, history?: string[], timeLimit = TIME_LIMIT): Move {
-  if (kind === 'random') return randomMove(game);
-  if (kind === 'greedy') return greedyMove(game);
-  return iterativeMove(game, timeLimit, history);
+// ---------- 실수 ----------
+// 성격의 실수 확률만큼, 최선의 수 대신 "그럭저럭 괜찮은 다른 수"를 둠
+// 후보: 2수 앞까지 정확히 점수를 매겼을 때 최선보다 margin 이하로만 나쁜 수 (최선의 수 제외)
+// 후보가 없으면(다른 수가 전부 크게 나쁘면) 그냥 최선의 수
+export const mistakeStats = { made: 0 }; // 실수한 횟수 (테스트용)
+
+function maybeMistake(original: GameState, best: Move, p: Personality, history?: string[]): Move {
+  if (!p.mistakeChance || Math.random() >= p.mistakeChance) return best;
+  const game = cloneGame(original);
+  startSearch(game, history);
+  pathHi = historyHi.slice();
+  pathLo = historyLo.slice();
+  const sign = game.turn === 'w' ? 1 : -1; // 점수를 "AI 입장"으로 바꾸려고
+  const scored: { move: Move; score: number }[] = [];
+  for (const move of orderedMoves(game)) {
+    const undo = makeMove(game, move);
+    // 기준 없이(-무한대 ~ +무한대) 봐야 수마다 정확한 점수가 나옴
+    scored.push({ move, score: sign * alphaBeta(game, 1, -Infinity, Infinity) });
+    unmakeMove(game, move, undo);
+  }
+  const top = Math.max(...scored.map(x => x.score));
+  const margin = p.mistakeMargin ?? 100;
+  const candidates = scored.filter(x => !sameMove(x.move, best) && x.score >= top - margin);
+  if (candidates.length === 0) return best;
+  mistakeStats.made++;
+  return pickRandom(candidates).move;
+}
+
+// personality: 누가 두는지(성격). history: 실제 게임 장면 기록 (반복 무승부 판단용)
+// timeLimit: 성격에 생각 시간이 정해져 있지 않을 때 쓸 시간(ms)
+export function chooseMove(p: Personality, game: GameState, history?: string[], timeLimit = TIME_LIMIT): Move {
+  if (p.kind === 'random') return randomMove(game);
+  if (p.kind === 'greedy') return greedyMove(game);
+  applyPersonality(p, game.turn); // 지금 차례인 쪽 = AI
+  const best = iterativeMove(game, p.timeLimit ?? timeLimit, history);
+  return maybeMistake(game, best, p, history);
 }

@@ -181,3 +181,12 @@ body {
   .info { font-size: 18px; }
   .controls { flex-wrap: wrap; justify-content: center; }
 }
+
+/* 고른 상대의 성격 설명 */
+.persona-info {
+  color: #bbb;
+  font-size: 14px;
+  font-family: sans-serif;
+  text-align: center;
+  padding: 0 12px;
+}

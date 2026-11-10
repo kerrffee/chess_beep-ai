@@ -1,7 +1,7 @@
 import './style.css';
 import { initialGame, fromFEN, sq, cloneGame, type Color, type GameState, type PieceType } from './board';
 import { movesFrom, inCheck, gameStatus, makeMove, legalMoves, positionKey, type Move } from './moves';
-import type { AIKind } from './ai';
+import { PERSONALITIES, findPersonality } from './personality';
 
 // 끝에 붙인 \uFE0E = "그림 문자(이모지) 말고 글자 모양으로 그려 줘"
 // 이게 없으면 아이폰 등에서 흑 폰(♟)이 색깔 있는 이모지로 나옴
@@ -11,15 +11,13 @@ const SYMBOLS: Record<string, string> = Object.fromEntries(Object.entries({
   bk: '♚', bq: '♛', br: '♜', bb: '♝', bn: '♞', bp: '♟',
 }).map(([key, symbol]) => [key, symbol + TEXT_STYLE]));
 
-// 상대 고르기: 사람(둘이서) 또는 AI
-type Opponent = 'human' | AIKind;
+// 상대 고르기: 사람(둘이서) 또는 성격 있는 AI (personality.ts의 id)
+type Opponent = 'human' | string;
 const OPPONENTS: { value: Opponent; label: string }[] = [
+  ...PERSONALITIES.map(p => ({ value: p.id, label: p.name })),
   { value: 'human', label: '사람 (둘이서)' },
-  { value: 'random', label: '랜덤 AI' },
-  { value: 'greedy', label: '욕심쟁이 AI' },
-  { value: 'minimax', label: '생각하는 AI' },
 ];
-// 생각하는 AI가 한 수에 쓰는 시간
+// 생각 시간이 정해져 있지 않은 성격(대가)이 한 수에 쓰는 시간
 const THINK_TIMES: { value: number; label: string }[] = [
   { value: 500, label: '0.5초' },
   { value: 1000, label: '1초' },
@@ -42,7 +40,7 @@ let pendingPromotion: { from: number; to: number } | null = null;
 let history: string[] = [positionKey(game)];
 // 마지막으로 둔 수 (화면에 표시용)
 let lastMove: Move | null = null;
-let opponent: Opponent = 'human';
+let opponent: Opponent = PERSONALITIES[0].id; // 처음엔 대가
 let playerColor: Color = 'w';   // 내가 두는 색. AI는 반대 색 (사람끼리면 판 방향만 정함)
 let thinkTime = 1000;
 let aiTimer: number | null = null;
@@ -161,7 +159,7 @@ function maybeAIMove() {
   if (!isAITurn() || aiBusy || aiTimer !== null) return;
   aiBusy = true;
   aiStart = Date.now();
-  worker.postMessage({ id: ++aiRequest, kind: opponent as AIKind, game, history, timeLimit: thinkTime });
+  worker.postMessage({ id: ++aiRequest, personalityId: opponent, game, history, timeLimit: thinkTime });
 }
 
 // 일꾼의 대답이 오면 둠. 다만 부탁한 지 AI_DELAY가 안 됐으면 그때까지 기다림
@@ -225,11 +223,18 @@ function render() {
     { value: 'w' as Color, label: '나: 백' },
     { value: 'b' as Color, label: '나: 흑' },
   ], playerColor, v => { playerColor = v; restart(); }));
-  if (opponent === 'minimax') {
+  const persona = opponent === 'human' ? null : findPersonality(opponent);
+  if (persona && persona.kind === 'search' && persona.timeLimit === undefined) {
     // 생각 시간은 바꿔도 게임이 이어짐 (다음 수부터 적용)
     controls.appendChild(makeSelect('opponent', THINK_TIMES, thinkTime, v => { thinkTime = v; render(); }));
   }
   app.appendChild(controls);
+
+  // 고른 상대의 성격 한 줄 설명
+  const personaInfo = document.createElement('div');
+  personaInfo.className = 'persona-info';
+  personaInfo.textContent = persona ? persona.description : '한 화면에서 둘이 번갈아 둠';
+  app.appendChild(personaInfo);
 
   const info = document.createElement('div');
   info.className = 'info';
