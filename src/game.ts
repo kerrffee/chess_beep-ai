@@ -8,6 +8,7 @@ import { movesFrom, inCheck, gameStatus, makeMove, legalMoves, positionKey, type
 import { PERSONALITIES, findPersonality, type SpeechEvent } from './personality';
 import { toSAN, checkSuffix, squareName } from './notation';
 import { buildPGN } from './pgn';
+import { reloadForNewVersion } from './reload';
 
 // 상태가 바뀌었을 때 부를 함수 (화면이 등록함)
 let listener: () => void = () => {};
@@ -180,6 +181,9 @@ export function makeWorker(): Worker {
   const w = new Worker(new URL('./ai-worker.ts', import.meta.url), { type: 'module' });
   w.onmessage = (e: MessageEvent<{ id: number; move: Move; depth: number; score: number; book: boolean }>) =>
     onAIReply(e.data.id, e.data.move, e.data.depth, e.data.score, e.data.book);
+  // 일꾼 파일을 못 불러오면(열어 둔 사이에 새 버전이 배포됨) 새로고침해서 새 버전을 받음
+  // (계산 중 오류는 메시지가 있고, 파일을 못 찾은 경우엔 메시지가 없음 → 그때만)
+  w.onerror = e => { if (!e.message) reloadForNewVersion(); };
   return w;
 }
 

@@ -4,6 +4,7 @@
 // 승점: 이기면 1, 비기면 0.5, 지면 0
 import { PERSONALITIES, findPersonality } from './personality';
 import { makeButton, makeSelect } from './view';
+import { reloadForNewVersion } from './reload';
 
 export interface LeagueGame {
   white: string; black: string;   // 성격 id
@@ -52,6 +53,7 @@ function start(rerender: () => void) {
   const count = Math.max(1, Math.min(4, (navigator.hardwareConcurrency || 2) - 1));
   workers = Array.from({ length: count }, () => {
     const w = new Worker(new URL('./ai-worker.ts', import.meta.url), { type: 'module' });
+    w.onerror = e => { if (!e.message) reloadForNewVersion(); }; // 새 버전이 배포돼서 일꾼 파일을 못 찾을 때 (메시지 없음)
     w.onmessage = (e: MessageEvent) => {
       if (id !== runId || e.data.type !== 'gameResult') return;
       Object.assign(state.games[e.data.id], { result: e.data.result, reason: e.data.reason, ucis: e.data.ucis });

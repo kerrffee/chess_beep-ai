@@ -3,6 +3,7 @@ import { initialGame, type Color, type PieceType } from './board';
 import { makeMove, legalMoves, inCheck, gameStatus, type Move } from './moves';
 import type { Board3D, CameraView } from './three/board3d';
 import { playMoveSound, unlockAudio } from './sound';
+import { reloadForNewVersion, isMissingChunk } from './reload';
 import { findPersonality } from './personality';
 import { squareName } from './notation';
 import * as G from './game'; // 게임 진행 담당 (판 상태, 수 두기, AI, 대사 …)
@@ -83,6 +84,8 @@ async function ensure3D() {
     board3D.setView(view3D);
   } catch (err) {
     console.error(err);
+    // 열어 둔 사이에 새 버전이 배포돼서 3D 파일을 못 찾은 거면, 새로고침해서 새 버전을 받음
+    if (isMissingChunk(err) && reloadForNewVersion()) return;
     // 원인을 같이 보여 줌: 3D 그래픽(WebGL) 자체가 꺼져 있는지, 다른 문제인지
     let webgl = false;
     try { webgl = !!document.createElement('canvas').getContext('webgl2'); } catch { /* 확인 실패 = 없음 */ }
