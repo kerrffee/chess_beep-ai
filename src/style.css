@@ -239,3 +239,84 @@ body {
 .graph-line { fill: none; stroke: #e8c66a; stroke-width: 1.6; vector-effect: non-scaling-stroke; }
 .graph-dot { fill: #e8c66a; }
 .graph-label { color: #888; font-size: 11px; font-family: sans-serif; margin-top: 2px; }
+
+/* ---------- 맨 위 탭: 대국 / 리그 / 기보 보기 ---------- */
+.tabs {
+  display: flex;
+  gap: 4px;
+  background: #333;
+  padding: 4px;
+  border-radius: 10px;
+}
+.tab {
+  border: none;
+  background: transparent;
+  color: #aaa;
+  padding: 8px 18px;
+  border-radius: 7px;
+  font-size: 15px;
+  cursor: pointer;
+}
+.tab-on { background: #555; color: #fff; }
+
+/* 기보에서 지금 보는 수 강조, 누를 수 있는 수 */
+.move-current { background: #e8c66a; color: #222; border-radius: 3px; padding: 0 3px; }
+.move-click { cursor: pointer; }
+.move-click:hover { text-decoration: underline; }
+
+/* ---------- 리그 ---------- */
+.league {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  width: min(560px, calc(100vw - 24px));
+  font-family: sans-serif;
+}
+.league-picks {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px 14px;
+  color: #ddd;
+  font-size: 15px;
+}
+.league-picks label { cursor: pointer; white-space: nowrap; }
+.league-table {
+  border-collapse: collapse;
+  color: #ddd;
+  font-size: 15px;
+  width: 100%;
+}
+.league-table th, .league-table td { padding: 6px 8px; text-align: center; border-bottom: 1px solid #444; }
+.league-table th { color: #999; font-weight: normal; }
+.league-table td:nth-child(2) { text-align: left; }
+.league-games {
+  width: 100%;
+  max-height: 300px;
+  overflow-y: auto;
+  background: #333;
+  border-radius: 6px;
+  padding: 6px 10px;
+  box-sizing: border-box;
+}
+.league-game {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  color: #ccc;
+  font-size: 14px;
+  padding: 4px 0;
+  border-bottom: 1px solid #3d3d3d;
+}
+.small-btn {
+  font-size: 12px;
+  padding: 3px 8px;
+  border-radius: 5px;
+  border: none;
+  background: #555;
+  color: #eee;
+  cursor: pointer;
+  white-space: nowrap;
+}

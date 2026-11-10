@@ -1,16 +1,46 @@
 import './style.css';
-import { initialGame, fromFEN, sq, cloneGame, type Color, type GameState, type PieceType } from './board';
+import { initialGame, fromFEN, cloneGame, type Color, type GameState, type PieceType } from './board';
 import { movesFrom, inCheck, gameStatus, makeMove, legalMoves, positionKey, type Move } from './moves';
 import { PERSONALITIES, findPersonality, type SpeechEvent } from './personality';
 import { toSAN, checkSuffix, squareName } from './notation';
 
-// 끝에 붙인 ︎ = "그림 문자(이모지) 말고 글자 모양으로 그려 줘"
-// 이게 없으면 아이폰 등에서 흑 폰(♟)이 색깔 있는 이모지로 나옴
-const TEXT_STYLE = '︎';
-const SYMBOLS: Record<string, string> = Object.fromEntries(Object.entries({
-  wk: '♔', wq: '♕', wr: '♖', wb: '♗', wn: '♘', wp: '♙',
-  bk: '♚', bq: '♛', br: '♜', bb: '♝', bn: '♞', bp: '♟',
-}).map(([key, symbol]) => [key, symbol + TEXT_STYLE]));
+import { SYMBOLS, drawBoard, drawMoveList, makeButton, makeSelect, scrollMoves } from './view';
+import { buildPGN, downloadText, pgnFilename, sansOf } from './pgn';
+import { renderLeague, type LeagueGame } from './league';
+import { renderReplay, openGame, stopAuto } from './replay';
+
+// ---------- 화면 고르기 (맨 위 탭) ----------
+type Screen = 'play' | 'league' | 'replay';
+let screen: Screen = 'play';
+const SCREENS: { value: Screen; label: string }[] = [
+  { value: 'play', label: '대국' },
+  { value: 'league', label: '리그' },
+  { value: 'replay', label: '기보 보기' },
+];
+function switchScreen(next: Screen) {
+  if (next === screen) return;
+  if (screen === 'play') stopAI();       // 대국 화면을 떠나면 AI 생각은 멈춤 (돌아오면 다시 생각함)
+  if (screen === 'replay') stopAuto();   // 다시 보기 자동 재생도 멈춤
+  screen = next;
+  render();
+}
+
+// 리그에서 끝난 판을 "기보 보기"로 열기
+function openLeagueGame(g: LeagueGame) {
+  const start = initialGame();
+  const pos = initialGame();
+  const moves: Move[] = [];
+  for (const uci of g.ucis!) {
+    const m = legalMoves(pos).find(x => squareName(x.from) + squareName(x.to) + (x.promotion ?? '') === uci)!;
+    moves.push(m);
+    makeMove(pos, m);
+  }
+  openGame({
+    start, moves, sans: sansOf(start, moves), result: g.result!,
+    white: findPersonality(g.white).name, black: findPersonality(g.black).name,
+  });
+  switchScreen('replay');
+}
 const PIECE_NAMES: Record<PieceType, string> = { p: '폰', n: '나이트', b: '비숍', r: '룩', q: '퀸', k: '킹' };
 
 // 상대 고르기: 성격 있는 AI (personality.ts의 id), 사람(둘이서), AI끼리 구경
@@ -347,37 +377,25 @@ function statusText(): string {
   return `${side} 차례${check}${thinking}`;
 }
 
-// 고르기 상자 하나 만들기 (바꾸면 onChange 실행)
-function makeSelect<T extends string | number>(
-  className: string, options: { value: T; label: string }[], current: T, onChange: (v: T) => void,
-): HTMLSelectElement {
-  const box = document.createElement('select');
-  box.className = className;
-  options.forEach((o, i) => {
-    const option = document.createElement('option');
-    option.value = String(i);
-    option.textContent = o.label;
-    option.selected = o.value === current;
-    box.appendChild(option);
-  });
-  box.addEventListener('change', () => onChange(options[Number(box.value)].value));
-  return box;
-}
-
-function makeButton(text: string, onClick: () => void, disabled = false): HTMLButtonElement {
-  const btn = document.createElement('button');
-  btn.className = 'restart';
-  btn.textContent = text;
-  btn.disabled = disabled;
-  btn.addEventListener('click', onClick);
-  return btn;
-}
-
 function render() {
   const app = document.querySelector<HTMLDivElement>('#app')!;
   app.innerHTML = '';
 
-  const checked = inCheck(game, game.turn);
+  // 맨 위 탭: 대국 / 리그 / 기보 보기
+  const tabs = document.createElement('div');
+  tabs.className = 'tabs';
+  for (const t of SCREENS) {
+    tabs.appendChild(makeButton(t.label, () => switchScreen(t.value), false, 'tab' + (t.value === screen ? ' tab-on' : '')));
+  }
+  app.appendChild(tabs);
+
+  if (screen === 'league') { renderLeague(app, render, openLeagueGame); return; }
+  if (screen === 'replay') { renderReplay(app, render); return; }
+  renderPlay(app);
+}
+
+// 대국 화면 (사람 vs AI, 사람끼리, AI 대결 구경)
+function renderPlay(app: HTMLElement) {
   const watching = opponent === 'watch';
 
   // ① 맨 위: 상대 / (내 색 또는 백·흑 AI) / 생각 시간
@@ -441,39 +459,15 @@ function render() {
   const middle = document.createElement('div');
   middle.className = 'middle';
 
-  const boardEl = document.createElement('div');
-  boardEl.className = 'board';
   // 내가 흑이면 판을 뒤집어서 내 기물이 아래에 오게 (구경할 때는 항상 백이 아래)
-  const flipped = !watching && playerColor === 'b';
-  for (let row = 0; row < 8; row++) {
-    for (let col = 0; col < 8; col++) {
-      const rank = flipped ? row : 7 - row;
-      const file = flipped ? 7 - col : col;
-      const index = sq(file, rank);
-      const piece = game.board[index];
-
-      const cell = document.createElement('div');
-      const isLight = (file + rank) % 2 === 1;
-      cell.className = 'square ' + (isLight ? 'light' : 'dark');
-
-      if (lastMove && (index === lastMove.from || index === lastMove.to)) cell.classList.add('last');
-      if (index === selected) cell.classList.add('selected');
-      if (targets.includes(index)) cell.classList.add(piece ? 'capture' : 'target');
-      if (checked && piece && piece.type === 'k' && piece.color === game.turn) {
-        cell.classList.add('check');
-      }
-
-      if (piece) cell.textContent = SYMBOLS[piece.color + piece.type];
-
-      cell.addEventListener('click', () => onSquareClick(index));
-      boardEl.appendChild(cell);
-    }
-  }
+  const boardEl = drawBoard(game, {
+    flipped: !watching && playerColor === 'b', lastMove, selected, targets, onClick: onSquareClick,
+  });
   middle.appendChild(boardEl);
 
   const side = document.createElement('div');
   side.className = 'side';
-  side.appendChild(moveList());
+  side.appendChild(drawMoveList(moveTexts, firstTurn));
   side.appendChild(scoreGraph());
   middle.appendChild(side);
   app.appendChild(middle);
@@ -491,34 +485,9 @@ function render() {
 
   if (pendingPromotion) app.appendChild(promotionPicker(pendingPromotion));
 
-  // 기보는 항상 마지막 수가 보이게 맨 아래로
-  const list = app.querySelector('.moves');
-  if (list) list.scrollTop = list.scrollHeight;
+  scrollMoves(app); // 기보는 항상 마지막 수가 보이게
 
   maybeAIMove();
-}
-
-// 기보: "1. e4  e5" 처럼 한 줄에 백·흑 한 수씩
-function moveList(): HTMLElement {
-  const box = document.createElement('div');
-  box.className = 'moves';
-  // 흑부터 시작한 게임이면 첫 줄 백 자리는 "…"
-  const texts = firstTurn === 'b' ? ['…', ...moveTexts] : moveTexts;
-  for (let i = 0; i < texts.length; i += 2) {
-    const row = document.createElement('div');
-    row.className = 'move-row';
-    const num = document.createElement('span');
-    num.className = 'move-num';
-    num.textContent = `${i / 2 + 1}.`;
-    const w = document.createElement('span');
-    w.textContent = texts[i];
-    const b = document.createElement('span');
-    b.textContent = texts[i + 1] ?? '';
-    row.append(num, w, b);
-    box.appendChild(row);
-  }
-  if (texts.length === 0) box.textContent = '아직 둔 수가 없어요';
-  return box;
 }
 
 // 형세 그래프: 가운데 선 위 = 백 유리, 아래 = 흑 유리. ±8폰(800점)에서 잘림
@@ -548,42 +517,18 @@ function scoreGraph(): HTMLElement {
   return wrap;
 }
 
-// 기보 저장: PGN(체스 기보 표준 형식) 파일로 내려받기. 다른 체스 사이트·앱에서 열 수 있음
+// 기보 저장: PGN(체스 기보 표준 형식) 파일로 내려받기. 다른 체스 사이트·앱이나 "기보 보기"에서 열 수 있음
 function downloadPGN() {
   const status = gameStatus(game, history);
   let result = '*'; // 아직 진행 중
   if (resigned) result = resigned === 'w' ? '0-1' : '1-0';
   else if (status === 'checkmate') result = game.turn === 'w' ? '0-1' : '1-0';
   else if (status !== 'playing') result = '1/2-1/2';
-
   const nameOf = (c: Color) => { const id = aiFor(c); return id ? findPersonality(id).name : '사람'; };
-  const now = new Date();
-  const pad = (x: number) => String(x).padStart(2, '0');
-  const headers = [
-    ['Event', 'chess_beep-ai'],
-    ['Date', `${now.getFullYear()}.${pad(now.getMonth() + 1)}.${pad(now.getDate())}`],
-    ['White', nameOf('w')],
-    ['Black', nameOf('b')],
-    ['Result', result],
-    ...(startFEN ? [['SetUp', '1'], ['FEN', startFEN]] : []),
-  ].map(([k, v]) => `[${k} "${v}"]`).join('\n');
-
-  // 수 목록: "1. e4 e5 2. Nf3 …" (흑부터 시작했으면 "1... e5")
-  const parts: string[] = [];
-  moveTexts.forEach((text, i) => {
-    const ply = firstTurn === 'b' ? i + 1 : i;
-    if (ply % 2 === 0) parts.push(`${ply / 2 + 1}. ${text}`);
-    else if (i === 0) parts.push(`1... ${text}`);
-    else parts.push(text);
+  const pgn = buildPGN({
+    white: nameOf('w'), black: nameOf('b'), result, sans: moveTexts, firstTurn, fen: startFEN ?? undefined,
   });
-  const pgn = `${headers}\n\n${parts.join(' ')} ${result}\n`;
-
-  const blob = new Blob([pgn], { type: 'application/x-chess-pgn' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = `chess_${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}.pgn`;
-  a.click();
-  URL.revokeObjectURL(a.href);
+  downloadText(pgn, pgnFilename());
 }
 
 // 프로모션 고르기 창: 퀸·룩·비숍·나이트 + 취소
