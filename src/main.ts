@@ -14,7 +14,7 @@ const OPPONENTS: { value: Opponent; label: string }[] = [
   { value: 'human', label: '사람 (둘이서)' },
   { value: 'random', label: '랜덤 AI' },
   { value: 'greedy', label: '욕심쟁이 AI' },
-  { value: 'minimax', label: '생각하는 AI (3수 앞)' },
+  { value: 'minimax', label: '생각하는 AI (1초)' },
 ];
 const AI_COLOR = 'b';
 const AI_DELAY = 500; // AI가 두기 전에 기다리는 시간(ms). 너무 빠르면 뭘 뒀는지 안 보임
@@ -43,10 +43,12 @@ let worker = makeWorker();
 let aiRequest = 0;    // 몇 번째 부탁인지 (다시 시작한 뒤 도착한 옛 대답을 버리려고)
 let aiBusy = false;   // 일꾼이 지금 생각 중인지
 let aiStart = 0;      // 부탁한 시각
+let aiDepth = 0;      // 생각하는 AI가 지난 수에서 끝까지 본 깊이 (0이면 표시 안 함)
 
 function makeWorker(): Worker {
   const w = new Worker(new URL('./ai-worker.ts', import.meta.url), { type: 'module' });
-  w.onmessage = (e: MessageEvent<{ id: number; move: Move }>) => onAIReply(e.data.id, e.data.move);
+  w.onmessage = (e: MessageEvent<{ id: number; move: Move; depth: number }>) =>
+    onAIReply(e.data.id, e.data.move, e.data.depth);
   return w;
 }
 
@@ -74,6 +76,7 @@ function restart() {
   Object.assign(game, newGame()); // 게임 상태를 처음으로 덮어쓰기
   history = [positionKey(game)];
   lastMove = null;
+  aiDepth = 0;
   pendingPromotion = null;
   select(null);
   render();
@@ -94,7 +97,7 @@ function maybeAIMove() {
 
 // 일꾼의 대답이 오면 둠. 다만 부탁한 지 AI_DELAY가 안 됐으면 그때까지 기다림
 // (너무 빨리 두면 뭘 뒀는지 안 보여서)
-function onAIReply(id: number, move: Move) {
+function onAIReply(id: number, move: Move, depth: number) {
   if (id !== aiRequest) return; // 다시 시작하기 전에 한 부탁의 대답 → 버림
   aiBusy = false;
   const wait = Math.max(0, AI_DELAY - (Date.now() - aiStart));
@@ -102,6 +105,7 @@ function onAIReply(id: number, move: Move) {
     aiTimer = null;
     if (!isAITurn()) return;
     play(move);
+    aiDepth = depth;
     render();
   }, wait);
 }
@@ -147,6 +151,12 @@ function render() {
   info.className = 'info';
   info.textContent = statusText();
   app.appendChild(info);
+
+  // 생각하는 AI가 지난 수에서 몇 수 앞까지 봤는지
+  const depthInfo = document.createElement('div');
+  depthInfo.className = 'depth-info';
+  depthInfo.textContent = aiDepth > 0 ? `AI가 지난 수에서 ${aiDepth}수 앞까지 봄` : '';
+  app.appendChild(depthInfo);
 
   const boardEl = document.createElement('div');
   boardEl.className = 'board';

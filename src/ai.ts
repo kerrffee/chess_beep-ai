@@ -267,8 +267,18 @@ function orderedMoves(game: GameState): Move[] {
     .map(item => item.move);
 }
 
-// 탐색한 장면 수 (얼마나 일했는지 재보기용)
-export const stats = { nodes: 0 };
+// 탐색한 장면 수 (얼마나 일했는지 재보기용), 마지막 탐색에서 끝까지 본 깊이
+export const stats = { nodes: 0, depth: 0 };
+
+// ---------- 시간 제한 ----------
+// 시간이 다 되면 TimeUp을 던져서 탐색을 한 번에 빠져나옴 (try/catch로 받음)
+class TimeUp extends Error {}
+let deadline = Infinity; // 이 시각(ms)이 지나면 그만. 평소에는 무한대 = 제한 없음
+
+// 장면 1024개마다 한 번씩만 시계를 봄 (매번 보면 그것도 느려서)
+function checkTime() {
+  if ((stats.nodes & 1023) === 0 && Date.now() > deadline) throw new TimeUp();
+}
 
 // ---------- 정지 탐색 ----------
 
@@ -276,6 +286,7 @@ export const stats = { nodes: 0 };
 // 차례인 쪽은 "안 잡고 멈추기"도 고를 수 있음 → 지금 장면 점수(standPat)가 최소 보장 점수
 function quiesce(game: GameState, alpha: number, beta: number): number {
   stats.nodes++;
+  checkTime();
   const moves = orderedMoves(game);
 
   if (moves.length === 0) {
@@ -320,6 +331,7 @@ function quiesce(game: GameState, alpha: number, beta: number): number {
 // alpha: 백(최대 쪽)이 이미 확보한 점수, beta: 흑(최소 쪽)이 이미 확보한 점수
 function alphaBeta(game: GameState, depth: number, alpha: number, beta: number): number {
   stats.nodes++;
+  checkTime();
   const moves = orderedMoves(game); // 좋아 보이는 수부터
 
   if (moves.length === 0) {
@@ -351,13 +363,14 @@ function alphaBeta(game: GameState, depth: number, alpha: number, beta: number):
   }
 }
 
-// 알파-베타로 고른 가장 좋은 수. 같은 점수의 수가 여러 개면 그중 아무거나
-export function alphaBetaMove(game: GameState, depth: number): Move {
+// 맨 위(지금 장면)에서 moves를 주어진 순서대로 depth수 앞까지 봄
+// 돌려주는 것: 가장 좋은 점수와, 그 점수를 내는 수 전부
+function searchRoot(game: GameState, depth: number, moves: Move[]): { best: number; bestMoves: Move[] } {
   const white = game.turn === 'w';
   let best = white ? -Infinity : Infinity;
   let bestMoves: Move[] = [];
 
-  for (const move of orderedMoves(game)) {
+  for (const move of moves) {
     const copy = cloneGame(game);
     makeMove(copy, move);
     // 점수는 정수라서, 기준을 1 느슨하게 두면 "지금 최고와 같은 점수"까지 정확히 계산됨
@@ -373,13 +386,50 @@ export function alphaBetaMove(game: GameState, depth: number): Move {
       bestMoves.push(move);
     }
   }
-  return pickRandom(bestMoves);
+  return { best, bestMoves };
 }
 
-export const SEARCH_DEPTH = 3; // 몇 수 앞까지 볼지
+// 알파-베타로 고른 가장 좋은 수 (깊이 고정, 테스트용). 같은 점수의 수가 여러 개면 그중 아무거나
+export function alphaBetaMove(game: GameState, depth: number): Move {
+  return pickRandom(searchRoot(game, depth, orderedMoves(game)).bestMoves);
+}
+
+// ---------- 반복 심화 ----------
+// 1수 앞 → 2수 앞 → 3수 앞 … 순서로 점점 깊이 보다가, 시간이 다 되면 멈춤
+// 고르는 수 = "끝까지 다 본 깊이 중 가장 깊은 것"의 결과 (도중에 끊긴 깊이는 버림)
+// 지난 깊이에서 가장 좋았던 수를 다음 깊이에서 맨 먼저 봐서, 알파-베타가 더 많이 잘라냄
+export const TIME_LIMIT = 1000; // AI가 한 수에 쓰는 시간(ms)
+const MAX_DEPTH = 30;           // 남은 수가 적어서 금방 끝나는 장면에서 끝없이 깊어지지 않게
+
+export function iterativeMove(game: GameState, timeLimit: number): Move {
+  const start = Date.now();
+  let moves = orderedMoves(game);
+  if (moves.length === 1) { stats.depth = 0; return moves[0]; } // 둘 수 있는 게 하나뿐이면 바로
+
+  // 1수 앞은 시간과 상관없이 끝까지 (그래야 낼 수가 항상 있음)
+  let result = searchRoot(game, 1, moves);
+  stats.depth = 1;
+
+  deadline = start + timeLimit;
+  try {
+    for (let depth = 2; depth <= MAX_DEPTH; depth++) {
+      if (Math.abs(result.best) >= MATE) break; // 메이트를 찾았으면(하든 당하든) 더 볼 필요 없음
+      // 지난번 가장 좋았던 수들을 맨 앞으로, 나머지는 원래 순서대로
+      const first = result.bestMoves;
+      moves = [...first, ...moves.filter(m => !first.includes(m))];
+      result = searchRoot(game, depth, moves); // 시간이 다 되면 여기서 TimeUp이 날아옴 → result는 그대로
+      stats.depth = depth;
+    }
+  } catch (e) {
+    if (!(e instanceof TimeUp)) throw e; // 진짜 오류는 그대로 알림
+  } finally {
+    deadline = Infinity; // 다음 탐색(테스트 등)에 시간 제한이 남지 않게
+  }
+  return pickRandom(result.bestMoves);
+}
 
 export function chooseMove(kind: AIKind, game: GameState): Move {
   if (kind === 'random') return randomMove(game);
   if (kind === 'greedy') return greedyMove(game);
-  return alphaBetaMove(game, SEARCH_DEPTH);
+  return iterativeMove(game, TIME_LIMIT);
 }

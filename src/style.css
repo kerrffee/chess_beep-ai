@@ -38,6 +38,14 @@ body {
   font-family: sans-serif;
 }
 
+/* AI가 몇 수 앞까지 봤는지 (작고 흐리게). 비어 있어도 높이를 유지해서 판이 들썩이지 않게 */
+.depth-info {
+  color: #999;
+  font-size: 14px;
+  font-family: sans-serif;
+  min-height: 18px;
+}
+
 .square { cursor: pointer; }
 .square.selected { background: #f6f669; }
 .square { position: relative; }
