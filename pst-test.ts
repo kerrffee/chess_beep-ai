@@ -14,6 +14,21 @@ const center = fromFEN('4k3/8/8/8/8/2N5/8/4K3 w - - 0 1');
 const corner = fromFEN('4k3/8/8/8/8/8/8/N3K3 w - - 0 1');
 console.log(`나이트 가운데 ${evaluate(center)} > 구석 ${evaluate(corner)}`);
 
+// 3-2) 킹 위치 비교
+// 끝판(킹과 폰만): 가운데 킹이 구석 킹보다 점수가 높아야 함
+const egCenter = fromFEN('4k3/pppp4/8/8/3K4/8/PPPP4/8 w - - 0 1');
+const egCorner = fromFEN('4k3/pppp4/8/8/8/8/PPPP4/K7 w - - 0 1');
+console.log(`끝판 킹: 가운데 ${evaluate(egCenter)} > 구석 ${evaluate(egCorner)}`);
+// 중반(기물 다 있음): 캐슬링 자리(g1) 킹이 가운데로 나온 킹보다 점수가 높아야 함
+const mgCastled = fromFEN('rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQ1RK1 w kq - 0 1');
+const mgCenter = fromFEN('rnbqkbnr/pppppppp/8/8/3K4/8/PPPPPPPP/RNBQ1R2 w kq - 0 1');
+console.log(`중반 킹: 캐슬링 자리 ${evaluate(mgCastled)} > 가운데 ${evaluate(mgCenter)}`);
+
+// 3-3) 킹+폰 끝판에서 AI 킹이 앞으로 나오는지: 백 차례, 백 킹 e1
+const kp = fromFEN('4k3/4p3/8/8/8/8/4P3/4K3 w - - 0 1');
+const kpMove = alphaBetaMove(kp, 3);
+console.log(`킹+폰 끝판 백의 수: ${kp.board[kpMove.from]!.type} ${kpMove.from}→${kpMove.to} (킹이 위로 나오면 좋음)`);
+
 // 4) 시작 배치에서 생각하는 AI(3수 앞)가 첫 수로 무엇을 두는지 10번
 const names = 'abcdefgh';
 const name = (s: number) => names[s % 8] + (Math.floor(s / 8) + 1);

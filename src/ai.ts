@@ -68,7 +68,7 @@ const PST: Record<PieceType, number[]> = {
     -20, -10, -10,  -5,  -5, -10, -10, -20,
   ],
   // 킹(중반용): 캐슬링한 구석 자리가 +, 앞으로 나올수록 크게 −
-  // 끝판에는 킹이 가운데로 나와야 해서 표가 달라야 함 → 나중에 끝판 표를 따로 만들 예정
+  // 끝판에는 아래 KING_ENDGAME 표와 섞어서 씀
   k: [
     -30, -40, -40, -50, -50, -40, -40, -30,
     -30, -40, -40, -50, -50, -40, -40, -30,
@@ -81,13 +81,50 @@ const PST: Record<PieceType, number[]> = {
   ],
 };
 
+// 킹(끝판용): 기물이 다 빠지면 킹도 싸워야 함 → 가운데가 +, 구석은 −
+const KING_ENDGAME: number[] = [
+  -50, -40, -30, -20, -20, -30, -40, -50,
+  -30, -20, -10,   0,   0, -10, -20, -30,
+  -30, -10,  20,  30,  30,  20, -10, -30,
+  -30, -10,  30,  40,  40,  30, -10, -30,
+  -30, -10,  30,  40,  40,  30, -10, -30,
+  -30, -10,  20,  30,  30,  20, -10, -30,
+  -30, -30,   0,   0,   0,   0, -30, -30,
+  -50, -30, -30, -30, -30, -30, -30, -50,
+];
+
 // 칸 번호(a1 = 0 … h8 = 63) → 표에서 읽을 위치
 // 표의 첫 줄이 맨 위 줄이라서, 백은 줄을 뒤집어 읽고(7 − rank) 흑은 그대로 읽음(위아래 대칭)
-function pstBonus(type: PieceType, color: 'w' | 'b', square: number): number {
+function tableIndex(color: 'w' | 'b', square: number): number {
   const file = square % 8;
   const rank = Math.floor(square / 8);
   const row = color === 'w' ? 7 - rank : rank;
-  return PST[type][row * 8 + file];
+  return row * 8 + file;
+}
+
+// ---------- 게임 단계 ----------
+// 폰·킹을 뺀 기물이 얼마나 남았는지로 "중반 ↔ 끝판"을 0~24로 잼
+// 나이트·비숍 1, 룩 2, 퀸 4 → 처음엔 (1+1+2)×2×2 + 4×2 = 24, 다 빠지면 0
+const PHASE_WEIGHT: Record<PieceType, number> = { p: 0, n: 1, b: 1, r: 2, q: 4, k: 0 };
+const MAX_PHASE = 24;
+
+function gamePhase(game: GameState): number {
+  let phase = 0;
+  for (const p of game.board) if (p) phase += PHASE_WEIGHT[p.type];
+  return Math.min(phase, MAX_PHASE); // 프로모션으로 24를 넘을 수도 있어서
+}
+
+// 킹 보너스: 중반 표와 끝판 표를 단계에 따라 섞음
+// phase 24 → 중반 표 100%, phase 0 → 끝판 표 100%, 그 사이는 비율대로
+// 점수를 정수로 유지하려고 반올림 (알파-베타의 best ± 1 기법 때문)
+function kingBonus(color: 'w' | 'b', square: number, phase: number): number {
+  const i = tableIndex(color, square);
+  return Math.round((PST.k[i] * phase + KING_ENDGAME[i] * (MAX_PHASE - phase)) / MAX_PHASE);
+}
+
+function pstBonus(type: PieceType, color: 'w' | 'b', square: number, phase: number): number {
+  if (type === 'k') return kingBonus(color, square, phase);
+  return PST[type][tableIndex(color, square)];
 }
 
 function pickRandom<T>(items: T[]): T {
@@ -137,12 +174,14 @@ const MATE = 100000; // 체크메이트 점수. 어떤 기물 점수보다도 �
 
 // 평가함수 v2: (기물 값 + 그 칸의 보너스)를 백 전부 더한 것 − 흑 전부 더한 것 (백 입장 점수)
 // +면 백이 유리, −면 흑이 유리
+// 킹 표는 게임 단계(중반 ↔ 끝판)에 따라 섞어서 씀
 export function evaluate(game: GameState): number {
+  const phase = gamePhase(game);
   let score = 0;
   for (let s = 0; s < 64; s++) {
     const p = game.board[s];
     if (!p) continue;
-    const v = VALUE[p.type] + pstBonus(p.type, p.color, s);
+    const v = VALUE[p.type] + pstBonus(p.type, p.color, s, phase);
     score += p.color === 'w' ? v : -v;
   }
   return score;
