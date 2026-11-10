@@ -3,11 +3,42 @@ import * as THREE from 'three';
 // 크기 기준: 칸 한 변 = 1
 export type PieceKind = 'p' | 'r' | 'n' | 'b' | 'q' | 'k';
 
-// 옆모습 윤곽선: [가운데에서 떨어진 거리(반지름), 높이]
-// 이 점들을 세로축 둘레로 한 바퀴 돌려서 모양을 만듦
-function lathe(points: [number, number][], mat: THREE.Material): THREE.Mesh {
-  const profile = points.map(([r, y]) => new THREE.Vector2(r, y));
-  const geometry = new THREE.LatheGeometry(profile, 48);
+// 옆모습 윤곽선의 점: [가운데에서 떨어진 거리(반지름), 높이]
+// 세 번째 칸에 S를 붙이면 그 점은 뾰족한 모서리로 남김 (예: [0.34, 0, S])
+const S = 1;
+type ProfilePoint = [number, number] | [number, number, typeof S];
+
+// 점 사이를 부드러운 곡선(캣멀-롬 스플라인)으로 이음.
+// 뾰족한 점(S)과 처음·끝 점에서 곡선을 끊어서, 모서리는 각진 채로 둠
+function smoothProfile(points: ProfilePoint[]): THREE.Vector2[] {
+  const out: THREE.Vector2[] = [];
+  let run: THREE.Vector2[] = [];
+  const flush = () => {
+    if (run.length >= 3) {
+      const curve = new THREE.SplineCurve(run);
+      const pts = curve.getPoints((run.length - 1) * 10);
+      out.push(...(out.length ? pts.slice(1) : pts));
+    } else {
+      out.push(...(out.length ? run.slice(1) : run));
+    }
+  };
+  points.forEach((p, i) => {
+    const v = new THREE.Vector2(p[0], p[1]);
+    run.push(v);
+    const sharp = p[2] === S || i === points.length - 1;
+    if (sharp && i > 0) {
+      flush();
+      run = [v];
+    }
+  });
+  // 곡선이 가운데 축을 넘어가지 않게
+  out.forEach((v) => (v.x = Math.max(0, v.x)));
+  return out;
+}
+
+// 윤곽선을 세로축 둘레로 한 바퀴 돌려서 모양을 만듦
+function lathe(points: ProfilePoint[], mat: THREE.Material): THREE.Mesh {
+  const geometry = new THREE.LatheGeometry(smoothProfile(points), 64);
   return new THREE.Mesh(geometry, mat);
 }
 
@@ -22,9 +53,9 @@ function box(w: number, h: number, d: number, mat: THREE.Material): THREE.Mesh {
 }
 
 // 모든 기물이 같이 쓰는 받침 (높이 0 ~ 0.11)
-const BASE: [number, number][] = [
-  [0, 0],
-  [0.34, 0],
+const BASE: ProfilePoint[] = [
+  [0, 0, S],
+  [0.34, 0, S],
   [0.34, 0.05],
   [0.29, 0.08],
   [0.24, 0.11],
@@ -48,7 +79,7 @@ function makeRook(mat: THREE.Material): THREE.Group {
   const g = new THREE.Group();
   g.add(
     lathe(
-      [...BASE, [0.19, 0.16], [0.17, 0.45], [0.23, 0.5], [0.23, 0.6], [0, 0.6]],
+      [...BASE, [0.19, 0.16], [0.17, 0.45], [0.23, 0.5, S], [0.23, 0.6, S], [0, 0.6]],
       mat,
     ),
   );
@@ -65,7 +96,7 @@ function makeRook(mat: THREE.Material): THREE.Group {
 // 나이트: 임시 모양 (받침 + 기울어진 머리 상자). 나중에 다시 만들 예정
 function makeKnight(mat: THREE.Material): THREE.Group {
   const g = new THREE.Group();
-  g.add(lathe([...BASE, [0.2, 0.16], [0.17, 0.3], [0.2, 0.33], [0, 0.33]], mat));
+  g.add(lathe([...BASE, [0.2, 0.16], [0.17, 0.3], [0.2, 0.33, S], [0, 0.33]], mat));
   const neck = box(0.2, 0.32, 0.16, mat);
   neck.position.set(0, 0.47, 0);
   neck.rotation.z = -0.25;
@@ -113,7 +144,7 @@ function makeQueen(mat: THREE.Material): THREE.Group {
         [0.19, 0.58],
         [0.19, 0.61],
         [0.12, 0.64],
-        [0.2, 0.82],
+        [0.2, 0.82, S],
         [0.14, 0.84],
         [0.08, 0.86],
         [0, 0.87],
@@ -144,7 +175,7 @@ function makeKing(mat: THREE.Material): THREE.Group {
         [0.2, 0.61],
         [0.2, 0.64],
         [0.13, 0.67],
-        [0.18, 0.84],
+        [0.18, 0.84, S],
         [0.12, 0.87],
         [0, 0.88],
       ],
