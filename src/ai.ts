@@ -142,10 +142,54 @@ function orderedMoves(game: GameState): Move[] {
     .map(item => item.move);
 }
 
-// ---------- 알파-베타 ----------
-
 // 탐색한 장면 수 (얼마나 일했는지 재보기용)
 export const stats = { nodes: 0 };
+
+// ---------- 정지 탐색 ----------
+
+// 정해진 깊이를 다 본 뒤, 잡는 싸움이 끝날 때까지 "잡는 수만" 더 봄 (수평선 효과 막기)
+// 차례인 쪽은 "안 잡고 멈추기"도 고를 수 있음 → 지금 장면 점수(standPat)가 최소 보장 점수
+function quiesce(game: GameState, alpha: number, beta: number): number {
+  stats.nodes++;
+  const moves = orderedMoves(game);
+
+  if (moves.length === 0) {
+    if (!inCheck(game, game.turn)) return 0;
+    return game.turn === 'w' ? -MATE : MATE;
+  }
+
+  const standPat = evaluate(game); // 여기서 멈추면 받는 점수
+
+  if (game.turn === 'w') {
+    let best = standPat;
+    alpha = Math.max(alpha, best);
+    if (alpha >= beta) return best;
+    for (const move of moves) {
+      if (orderScore(game, move) === 0) break; // 정렬돼 있어서, 여기부터는 전부 조용한 수
+      const copy = structuredClone(game);
+      makeMove(copy, move);
+      best = Math.max(best, quiesce(copy, alpha, beta));
+      alpha = Math.max(alpha, best);
+      if (alpha >= beta) break;
+    }
+    return best;
+  } else {
+    let best = standPat;
+    beta = Math.min(beta, best);
+    if (alpha >= beta) return best;
+    for (const move of moves) {
+      if (orderScore(game, move) === 0) break;
+      const copy = structuredClone(game);
+      makeMove(copy, move);
+      best = Math.min(best, quiesce(copy, alpha, beta));
+      beta = Math.min(beta, best);
+      if (alpha >= beta) break;
+    }
+    return best;
+  }
+}
+
+// ---------- 알파-베타 ----------
 
 // 미니맥스와 같은 값을 내지만, 결과에 영향 없는 가지는 잘라냄
 // alpha: 백(최대 쪽)이 이미 확보한 점수, beta: 흑(최소 쪽)이 이미 확보한 점수
@@ -157,7 +201,7 @@ function alphaBeta(game: GameState, depth: number, alpha: number, beta: number):
     if (!inCheck(game, game.turn)) return 0;
     return game.turn === 'w' ? -(MATE + depth) : MATE + depth;
   }
-  if (depth === 0) return evaluate(game);
+  if (depth === 0) return quiesce(game, alpha, beta); // 끝에서 바로 세지 않고, 잡는 싸움부터 마저 봄
 
   if (game.turn === 'w') {
     let best = -Infinity;
