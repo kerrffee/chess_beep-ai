@@ -21,6 +21,13 @@ export interface Theme {
   lightSquare: WoodLook;
   darkSquare: WoodLook;
   frame: WoodLook;
+  // ── 아래 셋은 적지 않아도 됨 (적지 않으면 클래식과 같게) ──
+  // 칸·테두리의 광택: roughness(0 매끈 ~ 1 거침), clearcoat(니스 코팅 0~1). 없으면 니스 칠한 나무
+  boardFinish?: { roughness: number; clearcoat: number };
+  // 기물에 모델의 조각 자국(노멀 맵)을 빌려 쓸지. 없으면 true(씀)
+  pieceCarving?: boolean;
+  // 빛 번짐(후광) 세기: 밝은 부분 주변으로 빛이 퍼져 보이게 함. 0이거나 없으면 끔
+  bloom?: number;
 }
 
 export const CLASSIC: Theme = {
@@ -90,6 +97,8 @@ export const MINIMAL: Theme = {
   lightSquare: { base: '#ecece9', grain: '#e4e4e0' },
   darkSquare: { base: '#76787c', grain: '#717377' },
   frame: { base: '#2c2d30', grain: '#28292c' },
+  boardFinish: { roughness: 0.9, clearcoat: 0 }, // 완전한 무광
+  pieceCarving: false, // 매끈한 기물 (나무 조각 결 없음)
 };
 
 // 판타지: 아주 어두운 밤, 푸른 달빛, 은은하게 빛나는 기물
@@ -125,6 +134,7 @@ export const FANTASY: Theme = {
   lightSquare: { base: '#2a2e4a', grain: '#4a5590' },
   darkSquare: { base: '#110e22', grain: '#33256a' },
   frame: { base: '#0b0916', grain: '#3c2c78' },
+  bloom: 0.9, // 기물 주변으로 빛이 은은하게 퍼짐
 };
 
 export const THEMES: Theme[] = [CLASSIC, MARBLE, MINIMAL, FANTASY];

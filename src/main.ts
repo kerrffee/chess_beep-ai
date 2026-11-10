@@ -42,6 +42,8 @@ let error3D = '';
 const THEME_LIST = [ // themes.ts의 THEMES와 같은 순서 (3D를 켜기 전에는 그 파일을 불러오지 않아서 따로 적음)
   { value: 'classic', label: '테마: 클래식' },
   { value: 'marble', label: '테마: 대리석' },
+  { value: 'minimal', label: '테마: 미니멀' },
+  { value: 'fantasy', label: '테마: 판타지' },
 ];
 
 // ---------- 효과음 ----------

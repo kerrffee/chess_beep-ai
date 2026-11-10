@@ -7,6 +7,10 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { cloneGame, type GameState } from '../board';
 import { makeMove, type Move } from '../moves';
 import { makePiece, type PieceKind } from './pieces';
@@ -136,13 +140,15 @@ export async function createBoard3D(onSquareClick: (index: number) => void, them
   }
 
   // 칸마다 나뭇결이 조금씩 다르게: 같은 그림의 다른 부분을 잘라 씀
+  // 광택은 테마의 boardFinish를 따름 (없으면 니스 칠한 나무)
   function woodMaterial(base: THREE.CanvasTexture, rotate: boolean): THREE.MeshPhysicalMaterial {
     const tex = base.clone();
     tex.repeat.set(0.5, 0.5);
     tex.offset.set(Math.random() * 0.5, Math.random() * 0.5);
     if (rotate) { tex.center.set(0.5, 0.5); tex.rotation = Math.PI / 2; }
     tex.needsUpdate = true;
-    return new THREE.MeshPhysicalMaterial({ map: tex, roughness: 0.45, clearcoat: 0.4, clearcoatRoughness: 0.3 });
+    const finish = theme.boardFinish ?? { roughness: 0.45, clearcoat: 0.4 };
+    return new THREE.MeshPhysicalMaterial({ map: tex, ...finish, clearcoatRoughness: 0.3 });
   }
 
   // ── 테마 적용: 배경, 조명 세기, 판, 바닥, 기물 재질 ──
@@ -177,8 +183,9 @@ export async function createBoard3D(onSquareClick: (index: number) => void, them
       }
       const frameTex = woodTexture(theme.frame);
       frameTex.repeat.set(3, 3);
+      const frameFinish = theme.boardFinish ?? { roughness: 0.4, clearcoat: 0.6 };
       const frame = new THREE.Mesh(new THREE.BoxGeometry(9, 0.36, 9),
-        new THREE.MeshPhysicalMaterial({ map: frameTex, roughness: 0.4, clearcoat: 0.6, clearcoatRoughness: 0.2 }));
+        new THREE.MeshPhysicalMaterial({ map: frameTex, ...frameFinish, clearcoatRoughness: 0.2 }));
       frame.position.y = -0.19;
       frame.receiveShadow = frame.castShadow = true;
       themeGroup.add(frame);
@@ -192,14 +199,43 @@ export async function createBoard3D(onSquareClick: (index: number) => void, them
 
     whiteMat = new THREE.MeshPhysicalMaterial(theme.whitePiece);
     blackMat = new THREE.MeshPhysicalMaterial(theme.blackPiece);
-    if (modelSet) {
+    if (modelSet && theme.pieceCarving !== false) {
       whiteMat.normalMap = modelSet.normalMap(true); // 모델의 조각 자국을 테마 재질에도 빌려 씀
       blackMat.normalMap = modelSet.normalMap(false);
     }
+    setBloom(theme.bloom ?? 0);
     // 기물은 재질이 바뀌어야 하니 전부 새로 만듦
     for (const [sq, obj] of pieces) { piecesGroup.remove(obj); pieces.delete(sq); }
     if (current) { syncPieces(current.game); setKingFall(current); }
     requestRender();
+  }
+
+  // ── 빛 번짐(블룸) ──
+  // 장면을 한 번 그린 뒤, 밝은 부분만 뽑아 흐리게 번지게 해서 다시 겹쳐 그림 (후처리)
+  // 테마의 bloom이 0이면 후처리 없이 바로 그림 (더 빠름)
+  let composer: EffectComposer | null = null;
+  let bloomPass: UnrealBloomPass | null = null;
+  function setBloom(strength: number) {
+    if (strength <= 0) { composer?.dispose(); composer = null; bloomPass = null; return; }
+    if (!composer) {
+      composer = new EffectComposer(renderer);
+      composer.addPass(new RenderPass(scene, camera));
+      // 해상도, 세기, 퍼지는 넓이, 이 밝기 넘는 부분만 번짐
+      bloomPass = new UnrealBloomPass(new THREE.Vector2(256, 256), strength, 0.6, 0.6);
+      composer.addPass(bloomPass);
+      composer.addPass(new OutputPass()); // 색 보정(톤 매핑)을 마지막에 적용
+      resizeComposer();
+    }
+    bloomPass!.strength = strength;
+  }
+  function resizeComposer() {
+    if (!composer) return;
+    const w = element.clientWidth, h = element.clientHeight;
+    if (w === 0 || h === 0) return;
+    composer.setPixelRatio(renderer.getPixelRatio());
+    composer.setSize(w, h);
+    // 휴대폰에서는 번짐 계산을 절반 해상도로 (티는 거의 안 나고 훨씬 빠름)
+    bloomPass?.resolution.set(touch ? w / 2 : w, touch ? h / 2 : h);
   }
 
   // ── 다시 그리기는 필요할 때만 ──
@@ -421,6 +457,7 @@ export async function createBoard3D(onSquareClick: (index: number) => void, them
     renderer.setSize(w, h, false);
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
+    resizeComposer();
     requestRender();
   };
   const observer = new ResizeObserver(resize);
@@ -438,7 +475,7 @@ export async function createBoard3D(onSquareClick: (index: number) => void, them
     controls.update(); // 손을 뗀 뒤 부드럽게 멈추는 중이면 'change'가 와서 다시 그림
     if (!moving && !falling && !needsRender) return;
     needsRender = false;
-    renderer.render(scene, camera);
+    if (composer) composer.render(); else renderer.render(scene, camera);
     renders++;
   });
   let renders = 0; // 테스트용: 지금까지 그린 횟수
