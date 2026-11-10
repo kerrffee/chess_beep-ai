@@ -20,6 +20,7 @@ export interface Board3DState {
   targets: number[];
   flipped: boolean; // true면 흑 쪽에서 봄
   inCheck: boolean; // 둘 차례인 쪽 킹이 체크당했는지
+  checkmate: boolean; // 체크메이트면 진 쪽 킹이 쓰러짐
 }
 
 export type CameraView = 'angle' | 'top'; // 비스듬히 / 위에서
@@ -30,6 +31,7 @@ export interface Board3D {
   setTheme(id: string): void;
   setView(view: CameraView): void;
   dispose(): void;
+  renderCount(): number; // 테스트용: 지금까지 그린 횟수 (가만히 있을 때 안 늘어나야 함)
 }
 
 // 모델 파일은 한 번만 불러옴 (테마를 바꾸거나 3D를 다시 켜도 재사용)
@@ -51,7 +53,8 @@ function boardKey(g: GameState): string {
   return g.board.map(p => (p ? p.color + p.type : '..')).join('');
 }
 
-const MOVE_TIME = 320;    // 기물이 움직이는 시간(ms)
+const MOVE_TIME = 320;
+const FALL_TIME = 700;    // 체크메이트 때 킹이 쓰러지는 시간    // 기물이 움직이는 시간(ms)
 const JUMP_HEIGHT = 0.6;  // 나이트가 뛰어오르는 높이
 
 export async function createBoard3D(onSquareClick: (index: number) => void, themeId = 'classic'): Promise<Board3D> {
@@ -195,8 +198,15 @@ export async function createBoard3D(onSquareClick: (index: number) => void, them
     }
     // 기물은 재질이 바뀌어야 하니 전부 새로 만듦
     for (const [sq, obj] of pieces) { piecesGroup.remove(obj); pieces.delete(sq); }
-    if (current) syncPieces(current.game);
+    if (current) { syncPieces(current.game); setKingFall(current); }
+    requestRender();
   }
+
+  // ── 다시 그리기는 필요할 때만 ──
+  // 판이 가만히 있으면 그림이 그대로라서, 매번 그리면 배터리만 닳음 (특히 휴대폰)
+  // 무언가 바뀌면(수, 카메라, 테마, 크기) needsRender를 켜고, 다음 화면 갱신 때 한 번 그림
+  let needsRender = true;
+  const requestRender = () => { needsRender = true; };
 
   // ── 기물 ──
   const piecesGroup = new THREE.Group();
@@ -220,11 +230,17 @@ export async function createBoard3D(onSquareClick: (index: number) => void, them
 
   // 판 상태와 3D 기물을 맞춤 (움직임 없이 바로)
   function syncPieces(game: GameState) {
+    requestRender();
     for (let s = 0; s < 64; s++) {
       const p = game.board[s];
       const code = p ? p.color + p.type : null;
       const have = pieces.get(s);
-      if (have && have.userData.code === code) { have.position.copy(squarePosition(s)); have.scale.setScalar(1); continue; }
+      if (have && have.userData.code === code) {
+        have.position.copy(squarePosition(s));
+        have.scale.setScalar(1);
+        if (!have.userData.fallen) have.rotation.x = have.rotation.z = 0;
+        continue;
+      }
       if (have) { piecesGroup.remove(have); pieces.delete(s); }
       if (code) {
         const obj = createPiece(code);
@@ -308,6 +324,33 @@ export async function createBoard3D(onSquareClick: (index: number) => void, them
     afterTweens = null;
   }
 
+  // ── 체크메이트: 진 쪽 킹이 옆으로 쓰러짐 (무르기하면 다시 일어섬) ──
+  let fall: { obj: THREE.Object3D; start: number; dir: number } | null = null;
+  function setKingFall(state: Board3DState) {
+    // 먼저 모든 킹을 세움
+    for (const obj of pieces.values()) {
+      if (obj.userData.fallen) { obj.userData.fallen = false; obj.rotation.x = obj.rotation.z = 0; }
+    }
+    fall = null;
+    if (!state.checkmate) return;
+    const g = state.game;
+    const sq = g.board.findIndex(p => p && p.type === 'k' && p.color === g.turn); // 둘 차례인 쪽이 진 쪽
+    const king = pieces.get(sq);
+    if (!king) return;
+    king.userData.fallen = true;
+    fall = { obj: king, start: performance.now() + (tweens.length > 0 ? MOVE_TIME : 0), dir: Math.random() < 0.5 ? 1 : -1 };
+    requestRender();
+  }
+  function stepFall(now: number): boolean {
+    if (!fall) return false;
+    const k = Math.min(1, Math.max(0, (now - fall.start) / FALL_TIME));
+    // 처음엔 천천히 기울다가 빨라지고, 끝에서 살짝 튕김
+    const ease = k < 0.85 ? Math.pow(k / 0.85, 2) : 1 + Math.sin((k - 0.85) / 0.15 * Math.PI) * 0.04;
+    fall.obj.rotation.z = fall.dir * ease * (Math.PI / 2 - 0.1);
+    if (k >= 1) { fall = null; return true; }
+    return true;
+  }
+
   // ── 칸 표시: 마지막 수, 고른 칸, 둘 수 있는 칸, 체크 ──
   const marks = new THREE.Group();
   scene.add(marks);
@@ -320,6 +363,7 @@ export async function createBoard3D(onSquareClick: (index: number) => void, them
     TARGET = markMat(0x1a1a1a, 0.35), CHECK = markMat(0xff3b30, 0.55);
 
   function drawMarks(state: Board3DState) {
+    requestRender();
     marks.clear();
     const add = (geo: THREE.BufferGeometry, mat: THREE.Material, sq: number) => {
       const m = new THREE.Mesh(geo, mat);
@@ -342,6 +386,7 @@ export async function createBoard3D(onSquareClick: (index: number) => void, them
   let view: CameraView = 'angle';
   function placeCamera() {
     const side = flipped ? -1 : 1; // 흑 쪽에서 보면 반대편
+    requestRender();
     if (view === 'top') camera.position.set(0, 14, 0.01 * side);
     else camera.position.set(0, 10.5, 11.8 * side); // 판 전체가 들어오게 조금 멀리서
     camera.up.set(0, 1, 0);
@@ -358,7 +403,7 @@ export async function createBoard3D(onSquareClick: (index: number) => void, them
     if (!downAt) return;
     const moved = Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y);
     downAt = null;
-    if (moved > 6) return; // 돌린 것
+    if (moved > (touch ? 12 : 6)) return; // 돌린 것 (손가락은 조금 흔들려서 더 넉넉하게)
     const rect = renderer.domElement.getBoundingClientRect();
     const ndc = new THREE.Vector2(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1);
     raycaster.setFromCamera(ndc, camera);
@@ -376,17 +421,27 @@ export async function createBoard3D(onSquareClick: (index: number) => void, them
     renderer.setSize(w, h, false);
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
+    requestRender();
   };
   const observer = new ResizeObserver(resize);
   observer.observe(element);
 
   // ── 그리기: 화면에 붙어 있을 때만 (다른 탭이면 쉼) ──
+  controls.addEventListener('change', requestRender); // 카메라를 돌리거나 확대하면
+  let wasConnected = false;
   renderer.setAnimationLoop(now => {
-    if (!element.isConnected) return;
+    if (!element.isConnected) { wasConnected = false; return; }
+    if (!wasConnected) { wasConnected = true; needsRender = true; } // 다른 탭에서 돌아오면 한 번 그림
+    const moving = tweens.length > 0;
     stepTweens(now);
-    controls.update();
+    const falling = stepFall(now);
+    controls.update(); // 손을 뗀 뒤 부드럽게 멈추는 중이면 'change'가 와서 다시 그림
+    if (!moving && !falling && !needsRender) return;
+    needsRender = false;
     renderer.render(scene, camera);
+    renders++;
   });
+  let renders = 0; // 테스트용: 지금까지 그린 횟수
 
   // ── 바깥에서 부르는 함수 ──
   let current: Board3DState | null = null;
@@ -419,11 +474,14 @@ export async function createBoard3D(onSquareClick: (index: number) => void, them
           syncPieces(state.game);
         }
       }
+      const wasMate = prev?.checkmate ?? false;
       current = { ...state, game: cloneGame(state.game) };
       drawMarks(current);
+      if (state.checkmate !== wasMate) setKingFall(current); // 체크메이트가 되거나(쓰러짐) 풀릴 때(일어섬)만
     },
     setTheme(id) { finishTweens(); applyTheme(id); },
     setView(v) { view = v; placeCamera(); },
+    renderCount: () => renders,
     dispose() {
       renderer.setAnimationLoop(null);
       observer.disconnect();

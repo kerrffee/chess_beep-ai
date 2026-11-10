@@ -12,4 +12,4 @@ board.element.style.height = '100vh';
 board.element.style.borderRadius = '0';
 document.body.appendChild(board.element);
 const game = initialGame();
-board.update({ game, lastMove: null, selected: null, targets: [], flipped: false, inCheck: inCheck(game, game.turn) });
+board.update({ game, lastMove: null, selected: null, targets: [], flipped: false, inCheck: inCheck(game, game.turn), checkmate: false });

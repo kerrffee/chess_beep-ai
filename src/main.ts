@@ -1,7 +1,8 @@
 import './style.css';
 import { initialGame, type Color, type PieceType } from './board';
-import { makeMove, legalMoves, inCheck, type Move } from './moves';
+import { makeMove, legalMoves, inCheck, gameStatus, type Move } from './moves';
 import type { Board3D, CameraView } from './three/board3d';
+import { playMoveSound, unlockAudio } from './sound';
 import { findPersonality } from './personality';
 import { squareName } from './notation';
 import * as G from './game'; // 게임 진행 담당 (판 상태, 수 두기, AI, 대사 …)
@@ -42,6 +43,27 @@ const THEME_LIST = [ // themes.ts의 THEMES와 같은 순서 (3D를 켜기 전�
   { value: 'classic', label: '테마: 클래식' },
   { value: 'marble', label: '테마: 대리석' },
 ];
+
+// ---------- 효과음 ----------
+let soundOn = remember('chess.sound', 'on') === 'on';
+let heardMoves = 0; // 소리를 낸 수의 개수 (새 수가 생기면 그 수의 소리를 냄)
+function toggleSound() {
+  soundOn = !soundOn;
+  keep('chess.sound', soundOn ? 'on' : 'off');
+  render();
+}
+document.addEventListener('pointerdown', unlockAudio, { once: true });
+
+// 수가 새로 둬졌으면 소리 (3D면 기물이 내려앉는 순간에 맞춰 조금 늦게)
+function soundForNewMoves() {
+  const count = G.moveTexts.length;
+  if (count > heardMoves && soundOn) {
+    const san = G.moveTexts[count - 1];
+    if (use3D && board3D) setTimeout(() => playMoveSound(san), 300);
+    else playMoveSound(san);
+  }
+  heardMoves = count; // 무르기로 줄어들면 그대로 따라감
+}
 
 function toggle3D() {
   use3D = !use3D;
@@ -171,6 +193,7 @@ function renderPlay(app: HTMLElement) {
     board3D.update({
       game: G.game, lastMove: G.lastMove, selected: G.selected, targets: G.targets, flipped,
       inCheck: inCheck(G.game, G.game.turn),
+      checkmate: gameStatus(G.game, G.history) === 'checkmate',
     });
     middle.appendChild(board3D.element);
   } else if (use3D) {
@@ -208,6 +231,7 @@ function renderPlay(app: HTMLElement) {
   const viewRow = document.createElement('div');
   viewRow.className = 'controls';
   viewRow.appendChild(makeButton(use3D ? '2D로 보기' : '3D로 보기', toggle3D));
+  viewRow.appendChild(makeButton(soundOn ? '소리 끄기' : '소리 켜기', toggleSound));
   if (use3D) {
     viewRow.appendChild(makeSelect('opponent', THEME_LIST, theme3D, v => {
       theme3D = v;
@@ -232,6 +256,7 @@ function renderPlay(app: HTMLElement) {
   if (G.pendingPromotion) app.appendChild(promotionPicker());
 
   scrollMoves(app); // 기보는 항상 마지막 수가 보이게
+  soundForNewMoves();
 
   G.maybeAIMove();
 }
@@ -303,4 +328,6 @@ function promotionPicker(): HTMLElement {
 }
 
 G.onChange(render); // 게임 상태가 바뀌면 화면을 다시 그림
+// 테스트용: 3D 판을 몇 번 그렸는지 (가만히 있을 때 안 늘어나는지 확인)
+Object.assign(window, { __chess3dRenders: () => board3D?.renderCount() ?? 0 });
 render();
