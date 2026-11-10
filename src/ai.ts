@@ -1,5 +1,5 @@
 import { cloneGame, type GameState, type PieceType } from './board';
-import { legalMoves, makeMove, inCheck, type Move } from './moves';
+import { legalMoves, makeMove, unmakeMove, inCheck, type Move } from './moves';
 
 export type AIKind = 'random' | 'greedy' | 'minimax';
 
@@ -204,32 +204,33 @@ function minimax(game: GameState, depth: number): number {
   if (game.turn === 'w') {
     let best = -Infinity;
     for (const move of moves) {
-      const copy = cloneGame(game);
-      makeMove(copy, move);
-      best = Math.max(best, minimax(copy, depth - 1));
+      const undo = makeMove(game, move);
+      best = Math.max(best, minimax(game, depth - 1));
+      unmakeMove(game, move, undo);
     }
     return best;
   } else {
     let best = Infinity;
     for (const move of moves) {
-      const copy = cloneGame(game);
-      makeMove(copy, move);
-      best = Math.min(best, minimax(copy, depth - 1));
+      const undo = makeMove(game, move);
+      best = Math.min(best, minimax(game, depth - 1));
+      unmakeMove(game, move, undo);
     }
     return best;
   }
 }
 
 // 지금 차례인 쪽에게 가장 좋은 수. 점수가 같은 수가 여러 개면 그중 아무거나
-export function minimaxMove(game: GameState, depth: number): Move {
+export function minimaxMove(original: GameState, depth: number): Move {
+  const game = cloneGame(original); // 탐색은 복사본 위에서 (원래 판은 절대 안 건드림)
   const white = game.turn === 'w';
   let best = white ? -Infinity : Infinity;
   let bestMoves: Move[] = [];
 
   for (const move of legalMoves(game)) {
-    const copy = cloneGame(game);
-    makeMove(copy, move);
-    const score = minimax(copy, depth - 1);
+    const undo = makeMove(game, move);
+    const score = minimax(game, depth - 1);
+    unmakeMove(game, move, undo);
 
     const better = white ? score > best : score < best;
     if (better) {
@@ -302,9 +303,9 @@ function quiesce(game: GameState, alpha: number, beta: number): number {
     if (alpha >= beta) return best;
     for (const move of moves) {
       if (orderScore(game, move) === 0) break; // 정렬돼 있어서, 여기부터는 전부 조용한 수
-      const copy = cloneGame(game);
-      makeMove(copy, move);
-      best = Math.max(best, quiesce(copy, alpha, beta));
+      const undo = makeMove(game, move);
+      best = Math.max(best, quiesce(game, alpha, beta));
+      unmakeMove(game, move, undo);
       alpha = Math.max(alpha, best);
       if (alpha >= beta) break;
     }
@@ -315,9 +316,9 @@ function quiesce(game: GameState, alpha: number, beta: number): number {
     if (alpha >= beta) return best;
     for (const move of moves) {
       if (orderScore(game, move) === 0) break;
-      const copy = cloneGame(game);
-      makeMove(copy, move);
-      best = Math.min(best, quiesce(copy, alpha, beta));
+      const undo = makeMove(game, move);
+      best = Math.min(best, quiesce(game, alpha, beta));
+      unmakeMove(game, move, undo);
       beta = Math.min(beta, best);
       if (alpha >= beta) break;
     }
@@ -343,9 +344,9 @@ function alphaBeta(game: GameState, depth: number, alpha: number, beta: number):
   if (game.turn === 'w') {
     let best = -Infinity;
     for (const move of moves) {
-      const copy = cloneGame(game);
-      makeMove(copy, move);
-      best = Math.max(best, alphaBeta(copy, depth - 1, alpha, beta));
+      const undo = makeMove(game, move);
+      best = Math.max(best, alphaBeta(game, depth - 1, alpha, beta));
+      unmakeMove(game, move, undo);
       alpha = Math.max(alpha, best);
       if (alpha >= beta) break;   // 흑이 이쪽으로 안 옴 → 나머지 수는 안 봄
     }
@@ -353,9 +354,9 @@ function alphaBeta(game: GameState, depth: number, alpha: number, beta: number):
   } else {
     let best = Infinity;
     for (const move of moves) {
-      const copy = cloneGame(game);
-      makeMove(copy, move);
-      best = Math.min(best, alphaBeta(copy, depth - 1, alpha, beta));
+      const undo = makeMove(game, move);
+      best = Math.min(best, alphaBeta(game, depth - 1, alpha, beta));
+      unmakeMove(game, move, undo);
       beta = Math.min(beta, best);
       if (alpha >= beta) break;   // 백이 이쪽으로 안 옴 → 나머지 수는 안 봄
     }
@@ -371,12 +372,12 @@ function searchRoot(game: GameState, depth: number, moves: Move[]): { best: numb
   let bestMoves: Move[] = [];
 
   for (const move of moves) {
-    const copy = cloneGame(game);
-    makeMove(copy, move);
+    const undo = makeMove(game, move);
     // 점수는 정수라서, 기준을 1 느슨하게 두면 "지금 최고와 같은 점수"까지 정확히 계산됨
     const score = white
-      ? alphaBeta(copy, depth - 1, best - 1, Infinity)
-      : alphaBeta(copy, depth - 1, -Infinity, best + 1);
+      ? alphaBeta(game, depth - 1, best - 1, Infinity)
+      : alphaBeta(game, depth - 1, -Infinity, best + 1);
+    unmakeMove(game, move, undo);
 
     const better = white ? score > best : score < best;
     if (better) {
@@ -390,8 +391,15 @@ function searchRoot(game: GameState, depth: number, moves: Move[]): { best: numb
 }
 
 // 알파-베타로 고른 가장 좋은 수 (깊이 고정, 테스트용). 같은 점수의 수가 여러 개면 그중 아무거나
-export function alphaBetaMove(game: GameState, depth: number): Move {
+export function alphaBetaMove(original: GameState, depth: number): Move {
+  const game = cloneGame(original); // 탐색은 복사본 위에서
   return pickRandom(searchRoot(game, depth, orderedMoves(game)).bestMoves);
+}
+
+// 테스트용: depth수 앞까지 본 점수 (백 기준)
+export function searchScore(original: GameState, depth: number): number {
+  const game = cloneGame(original);
+  return searchRoot(game, depth, orderedMoves(game)).best;
 }
 
 // ---------- 반복 심화 ----------
@@ -401,8 +409,10 @@ export function alphaBetaMove(game: GameState, depth: number): Move {
 export const TIME_LIMIT = 1000; // AI가 한 수에 쓰는 시간(ms)
 const MAX_DEPTH = 30;           // 남은 수가 적어서 금방 끝나는 장면에서 끝없이 깊어지지 않게
 
-export function iterativeMove(game: GameState, timeLimit: number): Move {
+export function iterativeMove(original: GameState, timeLimit: number): Move {
   const start = Date.now();
+  // 탐색은 복사본 위에서: 시간이 다 돼서 탐색 도중에 빠져나오면 판이 두다 만 상태로 남기 때문
+  const game = cloneGame(original);
   let moves = orderedMoves(game);
   if (moves.length === 1) { stats.depth = 0; return moves[0]; } // 둘 수 있는 게 하나뿐이면 바로
 

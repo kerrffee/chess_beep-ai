@@ -1,4 +1,4 @@
-import { sq, cloneGame, type GameState, type PieceType } from './board';
+import { sq, type GameState, type Piece, type PieceType } from './board';
 
 // 수 하나: 출발 칸, 도착 칸, (폰이 끝 줄에 갈 때) 변신할 기물
 export interface Move {
@@ -147,21 +147,71 @@ function findKing(game: GameState, color: 'w' | 'b'): number {
   return -1;
 }
 
-// target 칸을 attacker 색 기물 중 하나라도 공격하고 있는지 (빈 칸도 가능)
-function isAttacked(game: GameState, target: number, attacker: 'w' | 'b'): boolean {
-  for (let i = 0; i < 64; i++) {
-    const p = game.board[i];
-    if (!p || p.color !== attacker) continue;
+// ---------- 미리 만들어 두는 표 (속도용) ----------
+// 칸마다 "나이트·킹이 한 번에 갈 수 있는 칸", "각 방향으로 미끄러질 때 지나는 칸 순서"를 처음 한 번만 계산
+// 그러면 공격 확인할 때 좌표 계산(onBoard, sq)을 매번 다시 안 해도 됨
+function buildSteps(offsets: [number, number][]): number[][] {
+  const table: number[][] = [];
+  for (let s = 0; s < 64; s++) {
+    const list: number[] = [];
+    for (const [df, dr] of offsets) {
+      const nf = fileOf(s) + df, nr = rankOf(s) + dr;
+      if (onBoard(nf, nr)) list.push(sq(nf, nr));
+    }
+    table.push(list);
+  }
+  return table;
+}
+const KNIGHT_TARGETS = buildSteps(KNIGHT_JUMPS);
+const KING_TARGETS = buildSteps(KING_STEPS);
 
-    if (p.type === 'p') {
-      const dir = p.color === 'w' ? 1 : -1;
-      const r = rankOf(i) + dir;
-      for (const df of [-1, 1]) {
-        const f = fileOf(i) + df;
-        if (onBoard(f, r) && sq(f, r) === target) return true;
-      }
-    } else if (pseudoMoves(game, i).includes(target)) {
-      return true;
+// RAYS[칸][방향] = 그 방향으로 가까운 칸부터 판 끝까지. 방향 0~3은 직선(룩), 4~7은 대각선(비숍)
+const RAYS: number[][][] = [];
+for (let s = 0; s < 64; s++) {
+  RAYS.push(QUEEN_DIRS.map(([df, dr]) => {
+    const ray: number[] = [];
+    let nf = fileOf(s) + df, nr = rankOf(s) + dr;
+    while (onBoard(nf, nr)) { ray.push(sq(nf, nr)); nf += df; nr += dr; }
+    return ray;
+  }));
+}
+
+// PAWN_ATTACKERS[색][칸] = 그 색 폰이 어디 있으면 이 칸을 공격하는지
+// 백 폰은 위쪽 대각선을 공격하니까, 칸의 "아래쪽" 대각선에 있어야 함 (흑은 반대)
+const PAWN_ATTACKERS = {
+  w: buildSteps([[-1, -1], [1, -1]]),
+  b: buildSteps([[-1, 1], [1, 1]]),
+};
+
+// target 칸을 attacker 색 기물 중 하나라도 공격하고 있는지 (빈 칸도 가능)
+// 거꾸로 생각함: 상대 기물을 전부 훑는 대신, target에서 바깥으로 "누가 나를 노리나"만 봄
+//   target에서 나이트 모양으로 갔을 때 상대 나이트가 있으면 → 그 나이트가 target을 공격 중
+//   target에서 직선으로 미끄러지다 처음 만난 기물이 상대 룩·퀸이면 → 공격 중 (비숍·퀸은 대각선)
+function isAttacked(game: GameState, target: number, attacker: 'w' | 'b'): boolean {
+  const b = game.board;
+
+  for (const s of PAWN_ATTACKERS[attacker][target]) {
+    const p = b[s];
+    if (p && p.color === attacker && p.type === 'p') return true;
+  }
+  for (const s of KNIGHT_TARGETS[target]) {
+    const p = b[s];
+    if (p && p.color === attacker && p.type === 'n') return true;
+  }
+  for (const s of KING_TARGETS[target]) {
+    const p = b[s];
+    if (p && p.color === attacker && p.type === 'k') return true;
+  }
+
+  // 미끄러지는 기물: 방향마다 처음 만나는 기물만 확인
+  const rays = RAYS[target];
+  for (let d = 0; d < 8; d++) {
+    const slider = d < 4 ? 'r' : 'b'; // 직선이면 룩, 대각선이면 비숍 (퀸은 둘 다)
+    for (const s of rays[d]) {
+      const p = b[s];
+      if (!p) continue;
+      if (p.color === attacker && (p.type === slider || p.type === 'q')) return true;
+      break; // 다른 기물에 막힘
     }
   }
   return false;
@@ -200,9 +250,31 @@ function castlingMoves(game: GameState, from: number): number[] {
 
 // ---------- 수 두기 ----------
 
-export function makeMove(game: GameState, move: Move): void {
+// 수를 되돌리는 데 필요한 "두기 전 정보"
+export interface Undo {
+  moved: Piece;                  // 움직인 기물 (프로모션 전 폰 그대로)
+  captured: Piece | null;        // 잡힌 기물
+  capturedSquare: number;        // 잡힌 기물이 있던 칸 (앙파상이면 도착 칸과 다름)
+  castling: GameState['castling'];
+  enPassant: number | null;
+  halfmoveClock: number;
+}
+
+// 수를 두고, 되돌릴 때 쓸 정보(Undo)를 돌려줌
+export function makeMove(game: GameState, move: Move): Undo {
   const { from, to } = move;
   const piece = game.board[from]!;
+
+  const isEnPassant = piece.type === 'p' && to === game.enPassant;
+  const capturedSquare = isEnPassant ? sq(fileOf(to), rankOf(from)) : to;
+  const undo: Undo = {
+    moved: piece,
+    captured: game.board[capturedSquare],
+    capturedSquare,
+    castling: { ...game.castling },
+    enPassant: game.enPassant,
+    halfmoveClock: game.halfmoveClock,
+  };
 
     // 50수 규칙 시계: 폰을 움직이거나 잡으면 0, 아니면 +1
   const isCapture = game.board[to] !== null || (piece.type === 'p' && to === game.enPassant);
@@ -254,6 +326,29 @@ export function makeMove(game: GameState, move: Move): void {
   }
 
   game.turn = game.turn === 'w' ? 'b' : 'w';
+  return undo;
+}
+
+// makeMove를 거꾸로: 두기 전 장면으로 정확히 돌려놓음
+export function unmakeMove(game: GameState, move: Move, undo: Undo): void {
+  const { from, to } = move;
+  const b = game.board;
+
+  game.turn = game.turn === 'w' ? 'b' : 'w';
+  b[from] = undo.moved;                                   // 프로모션했어도 원래 폰으로
+  b[to] = null;
+  if (undo.captured) b[undo.capturedSquare] = undo.captured;
+
+  // 캐슬링이었으면 룩도 제자리로
+  if (undo.moved.type === 'k' && Math.abs(fileOf(to) - fileOf(from)) === 2) {
+    const r = rankOf(from);
+    if (fileOf(to) === 6) { b[sq(7, r)] = b[sq(5, r)]; b[sq(5, r)] = null; }
+    else                  { b[sq(0, r)] = b[sq(3, r)]; b[sq(3, r)] = null; }
+  }
+
+  game.castling = undo.castling;
+  game.enPassant = undo.enPassant;
+  game.halfmoveClock = undo.halfmoveClock;
 }
 
 // ---------- 둘 수 있는 모든 수 ----------
@@ -261,6 +356,8 @@ export function makeMove(game: GameState, move: Move): void {
 // 지금 차례인 쪽이 둘 수 있는 "진짜" 수 전부
 export function legalMoves(game: GameState): Move[] {
   const result: Move[] = [];
+  const enemy = game.turn === 'w' ? 'b' : 'w';
+  const kingSquare = findKing(game, game.turn); // 킹 위치는 한 번만 찾음 (킹이 움직이는 수만 따로)
 
   for (let from = 0; from < 64; from++) {
     const piece = game.board[from];
@@ -270,10 +367,12 @@ export function legalMoves(game: GameState): Move[] {
     if (piece.type === 'k') candidates.push(...castlingMoves(game, from));
 
     for (const to of candidates) {
-      // 둬봐서 내 킹이 안전한지 확인
-      const copy = cloneGame(game);
-      makeMove(copy, { from, to });
-      if (inCheck(copy, piece.color)) continue;
+      // 둬봐서 내 킹이 안전한지 확인하고, 바로 되돌림 (복사 없이)
+      const move = { from, to };
+      const undo = makeMove(game, move);
+      const unsafe = isAttacked(game, piece.type === 'k' ? to : kingSquare, enemy);
+      unmakeMove(game, move, undo);
+      if (unsafe) continue;
 
       // 폰이 끝 줄에 가면 4가지 수로 나눔
       const lastRank = piece.color === 'w' ? 7 : 0;
