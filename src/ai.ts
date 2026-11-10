@@ -117,6 +117,31 @@ export function minimaxMove(game: GameState, depth: number): Move {
   return pickRandom(bestMoves);
 }
 
+// ---------- 수 정렬 ----------
+
+// 어떤 수부터 볼지 정하는 점수 (클수록 먼저 봄). 결과는 안 바뀌고 속도만 바뀜
+// 잡는 수: 10 × 잡히는 기물 값 − 잡는 기물 값 → 비싼 기물을 싼 기물로 잡는 수가 앞
+// 프로모션: 늘어나는 값만큼 더함. 아무것도 안 잡는 수는 0
+function orderScore(game: GameState, move: Move): number {
+  const piece = game.board[move.from]!;
+  const target = game.board[move.to];
+
+  let score = 0;
+  if (target) score += 10 * VALUE[target.type] - VALUE[piece.type];
+  else if (piece.type === 'p' && move.to === game.enPassant) score += 10 * VALUE.p - VALUE.p; // 앙파상
+
+  if (move.promotion) score += 10 * (VALUE[move.promotion] - VALUE.p);
+  return score;
+}
+
+// 둘 수 있는 수를 "좋아 보이는 순서"로 정렬해서 돌려줌
+function orderedMoves(game: GameState): Move[] {
+  return legalMoves(game)
+    .map(move => ({ move, score: orderScore(game, move) }))
+    .sort((a, b) => b.score - a.score)
+    .map(item => item.move);
+}
+
 // ---------- 알파-베타 ----------
 
 // 탐색한 장면 수 (얼마나 일했는지 재보기용)
@@ -126,7 +151,7 @@ export const stats = { nodes: 0 };
 // alpha: 백(최대 쪽)이 이미 확보한 점수, beta: 흑(최소 쪽)이 이미 확보한 점수
 function alphaBeta(game: GameState, depth: number, alpha: number, beta: number): number {
   stats.nodes++;
-  const moves = legalMoves(game);
+  const moves = orderedMoves(game); // 좋아 보이는 수부터
 
   if (moves.length === 0) {
     if (!inCheck(game, game.turn)) return 0;
@@ -163,7 +188,7 @@ export function alphaBetaMove(game: GameState, depth: number): Move {
   let best = white ? -Infinity : Infinity;
   let bestMoves: Move[] = [];
 
-  for (const move of legalMoves(game)) {
+  for (const move of orderedMoves(game)) {
     const copy = structuredClone(game);
     makeMove(copy, move);
     // 점수는 정수라서, 기준을 1 느슨하게 두면 "지금 최고와 같은 점수"까지 정확히 계산됨
@@ -182,7 +207,7 @@ export function alphaBetaMove(game: GameState, depth: number): Move {
   return pickRandom(bestMoves);
 }
 
-export const SEARCH_DEPTH = 2; // 몇 수 앞까지 볼지
+export const SEARCH_DEPTH = 3; // 몇 수 앞까지 볼지
 
 export function chooseMove(kind: AIKind, game: GameState): Move {
   if (kind === 'random') return randomMove(game);
