@@ -16,7 +16,7 @@ await p.evaluate(() => { localStorage.setItem('chess.view', '3d'); localStorage.
 await p.reload();
 await p.locator('select.opponent').nth(0).selectOption({ label: '사람 (둘이서)' });
 await p.waitForSelector('.board3d canvas', { timeout: 30000 });
-await p.click('text=위에서 보기');
+await p.locator('select.view-select').selectOption({ label: '시점: 위에서' });
 await p.waitForTimeout(2500);
 
 // 1) 가만히 있으면 안 그림
@@ -50,7 +50,7 @@ ok(info.includes('체크메이트'), '바보 메이트: ' + info);
 // 움직임은 시간 기준이라, 화면 없는 크롬처럼 한 장면이 느리면 장면 수가 적음 → "두 번 이상 다시 그렸는지"만 봄
 ok(r4 - r3 >= 2, `마지막 수 + 킹이 쓰러지는 동안 그림: ${r4 - r3}번`);
 await p.click('.panel-toggle'); // 설정 판 다시 펴기
-await p.click('text=비스듬히 보기');
+await p.locator('select.view-select').selectOption({ label: '시점: 비스듬히' });
 await p.waitForTimeout(1500);
 await p.locator('.board3d').screenshot({ path: tmp('chess-3d-mate.png') });
 console.log('   사진:', tmp('chess-3d-mate.png'));
@@ -79,7 +79,7 @@ await p2.reload();
 await p2.locator('select.opponent').nth(0).selectOption({ label: '사람 (둘이서)' });
 await p2.waitForSelector('.board3d canvas', { timeout: 30000 });
 ok(await p2.locator('.panel').count() === 1, '넓은 화면: 설정 판이 처음부터 펴져 있음');
-await p2.click('text=위에서 보기');
+await p2.locator('select.view-select').selectOption({ label: '시점: 위에서' });
 await p2.waitForTimeout(2500);
 // 위에서 본 화면: 판 가운데가 설정 판 폭(280px)의 절반만큼 왼쪽으로 옮겨져 있음
 const kk = 14 * Math.tan(20 * Math.PI / 180), shift = 280 / 2;
@@ -92,5 +92,37 @@ await p2.waitForTimeout(800);
 const rows = await p2.$$eval('.move-row', r => r.map(x => x.textContent));
 ok(rows.length === 1 && rows[0].includes('e4'), '설정 판을 편 채로 판 누르기: ' + JSON.stringify(rows));
 errs.push(...errs2);
+
+// 5) 대가와 두면 판 건너편에 실루엣이 앉아 있음: 숨 쉬느라 가만히 있어도 조금씩 그림(초당 약 12장),
+//    대가가 수를 두면 손을 뻗음 (사진으로 확인)
+const p3 = await (await b.newContext({ viewport: { width: 1000, height: 1000 } })).newPage();
+const errs3 = watchErrors(p3);
+await p3.goto(URL);
+await p3.evaluate(() => { localStorage.setItem('chess.view', '3d'); localStorage.setItem('chess.camera', 'top'); });
+await p3.reload();
+await p3.locator('select.opponent').nth(2).selectOption({ label: '0.5초' });
+await p3.waitForSelector('.board3d canvas', { timeout: 30000 });
+await p3.click('.panel-toggle'); // 설정 판 접기 → 위에서 본 판이 화면 가운데
+await p3.waitForTimeout(2000);
+const box3 = await p3.locator('.board3d canvas').boundingBox();
+const click3 = async (file, rank) => {
+  await p3.mouse.click(box3.x + ((file - 3.5) / kk + 1) / 2 * box3.width, box3.y + (1 + (3.5 - rank) / kk) / 2 * box3.height);
+  await p3.waitForTimeout(400);
+};
+await click3(4, 1); await click3(4, 3); // e4
+await p3.waitForFunction(() => document.querySelectorAll('.hud .info')[0]?.textContent.startsWith('백 차례'), null, { timeout: 20000 });
+await p3.click('.panel-toggle');
+await p3.locator('select.view-select').selectOption({ label: '시점: 앉아서' });
+await p3.waitForTimeout(1500);
+const q1 = await p3.evaluate(() => window.__chess3dRenders());
+await p3.waitForTimeout(2000);
+const q2 = await p3.evaluate(() => window.__chess3dRenders());
+// 느린 기기에서는 숨쉬기 장면을 드물게 그리니까(화면 없는 크롬이 그럼) "멈추지 않고 계속 그리는지"만 봄
+ok(q2 - q1 >= 1, `대가 실루엣이 숨 쉬는 동안 계속 그림: 2초에 ${q2 - q1}번`);
+await p3.click('.panel-toggle');
+await p3.waitForTimeout(1500);
+await p3.screenshot({ path: tmp('chess-room-master.png') });
+console.log('   사진 (방 + 대가 실루엣):', tmp('chess-room-master.png'));
+errs.push(...errs3);
 
 await finish(b, errs);

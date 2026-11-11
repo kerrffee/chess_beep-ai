@@ -16,6 +16,8 @@ import { makeMove, type Move } from '../moves';
 import { makePiece, type PieceKind } from './pieces';
 import { CLASSIC, THEMES, type Theme, type WoodLook } from './themes';
 import { loadModelSet, type ModelSet } from './modelSet';
+import { buildRoom } from './room';
+import { createOpponent, type Opponent } from './opponent';
 
 export interface Board3DState {
   game: GameState;
@@ -25,15 +27,18 @@ export interface Board3DState {
   flipped: boolean; // true면 흑 쪽에서 봄
   inCheck: boolean; // 둘 차례인 쪽 킹이 체크당했는지
   checkmate: boolean; // 체크메이트면 진 쪽 킹이 쓰러짐
+  // 판 건너편에 앉을 상대 (사람끼리·AI 구경·기보 보기면 없음). lost: 상대가 졌는지(체크메이트·기권)
+  opponent?: { id: string; color: 'w' | 'b'; lost: boolean } | null;
 }
 
-export type CameraView = 'angle' | 'top'; // 비스듬히 / 위에서
+export type CameraView = 'seat' | 'angle' | 'top'; // 앉아서 / 비스듬히 / 위에서
 
 export interface Board3D {
   element: HTMLElement;                 // 화면에 붙일 상자 (안에 3D 그림이 있음)
   update(state: Board3DState): void;    // 게임 상태가 바뀔 때마다 부름
   setTheme(id: string): void;
   setView(view: CameraView): void;
+  moveLandsIn(): number; // 마지막 수의 기물이 내려앉기까지 남은 시간(ms). 효과음을 그때 맞춰 냄
   // 오른쪽이 설정 판에 가려지는 폭(px). 판을 남은 자리 가운데로 옮기고, 넘치면 조금 멀리서 봄. 0이면 원래대로
   setRightInset(px: number): void;
   dispose(): void;
@@ -107,6 +112,7 @@ export async function createBoard3D(onSquareClick: (index: number) => void, them
   let themeGroup = new THREE.Group();
   scene.add(themeGroup);
   let theme: Theme = CLASSIC;
+  let deskTop = -0.37;
   let whiteMat = new THREE.MeshPhysicalMaterial();
   let blackMat = new THREE.MeshPhysicalMaterial();
 
@@ -160,9 +166,6 @@ export async function createBoard3D(onSquareClick: (index: number) => void, them
     themeGroup = new THREE.Group();
     scene.add(themeGroup);
     scene.background = new THREE.Color(theme.background);
-    // 먼 바닥은 배경색으로 서서히 흐려지게 (휴대폰 세로 화면처럼 넓게 볼 때 바닥 끝 경계선이 안 보이게)
-    // 판과 기물은 카메라에서 25보다 가까워서 영향 없음
-    scene.fog = new THREE.Fog(theme.background, 25, 60);
     scene.environmentIntensity = theme.envIntensity;
     ambient.intensity = theme.ambient;
     sun.color.set(theme.sunColor);
@@ -195,12 +198,10 @@ export async function createBoard3D(onSquareClick: (index: number) => void, them
       frame.receiveShadow = frame.castShadow = true;
       themeGroup.add(frame);
     }
-    const floor = new THREE.Mesh(new THREE.PlaneGeometry(200, 200),
-      new THREE.MeshStandardMaterial({ color: theme.background, roughness: 1 }));
-    floor.rotation.x = -Math.PI / 2;
-    floor.position.y = boardBottom - 0.001;
-    floor.receiveShadow = true;
-    themeGroup.add(floor);
+    // 방: 판은 책상 위에 놓임 (책상 윗면 = 판 밑면)
+    deskTop = boardBottom - 0.001;
+    themeGroup.add(buildRoom(theme.id, deskTop));
+    if (opp) setOpponent(oppKey, true); // 책상 높이가 테마마다 조금 달라서 상대도 다시 앉힘
 
     whiteMat = new THREE.MeshPhysicalMaterial(theme.whitePiece);
     blackMat = new THREE.MeshPhysicalMaterial(theme.blackPiece);
@@ -297,8 +298,11 @@ export async function createBoard3D(onSquareClick: (index: number) => void, them
   let tweens: Tween[] = [];
   let afterTweens: (() => void) | null = null;
 
-  function animateMove(prev: GameState, move: Move, game: GameState) {
-    const now = performance.now();
+  let landingAt = 0; // 마지막 수의 기물이 내려앉는 시각
+  // delay: 기물이 출발하기까지 기다리는 시간 (상대 캐릭터가 손을 뻗는 동안)
+  function animateMove(prev: GameState, move: Move, game: GameState, delay = 0) {
+    const now = performance.now() + delay;
+    landingAt = now + MOVE_TIME;
     const moving = pieces.get(move.from);
     if (!moving) { syncPieces(game); return; }
     // 잡히는 기물 (앙파상이면 도착 칸이 아니라 옆 칸)
@@ -335,7 +339,7 @@ export async function createBoard3D(onSquareClick: (index: number) => void, them
     if (tweens.length === 0) return;
     let allDone = true;
     for (const t of tweens) {
-      const k = Math.min(1, (now - t.start) / MOVE_TIME);
+      const k = Math.min(1, Math.max(0, (now - t.start) / MOVE_TIME)); // 출발 전이면 0
       const ease = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2; // 천천히 출발 → 빨리 → 천천히 도착
       if (t.vanish) {
         t.obj.scale.setScalar(Math.max(0.001, 1 - ease)); // 작아지며 사라짐
@@ -379,7 +383,7 @@ export async function createBoard3D(onSquareClick: (index: number) => void, them
     const king = pieces.get(sq);
     if (!king) return;
     king.userData.fallen = true;
-    fall = { obj: king, start: performance.now() + (tweens.length > 0 ? MOVE_TIME : 0), dir: Math.random() < 0.5 ? 1 : -1 };
+    fall = { obj: king, start: Math.max(performance.now(), tweens.length > 0 ? landingAt : 0), dir: Math.random() < 0.5 ? 1 : -1 };
     requestRender();
   }
   function stepFall(now: number): boolean {
@@ -390,6 +394,24 @@ export async function createBoard3D(onSquareClick: (index: number) => void, them
     fall.obj.rotation.z = fall.dir * ease * (Math.PI / 2 - 0.1);
     if (k >= 1) { fall = null; return true; }
     return true;
+  }
+
+  // ── 판 건너편 상대 캐릭터 ──
+  let opp: Opponent | null = null;
+  let oppKey = ''; // 'master:b' 처럼 (누가, 어느 색)
+  function setOpponent(key: string, force = false) {
+    if (key === oppKey && !force) return;
+    oppKey = key;
+    if (opp) { scene.remove(opp.group); opp.dispose(); opp = null; }
+    if (!key) { requestRender(); return; }
+    const [id, color] = key.split(':');
+    opp = createOpponent(id, deskTop);
+    if (opp) {
+      if (color === 'w') opp.group.rotation.y = Math.PI; // 백이면 판 반대편(내 쪽에서 보면 건너편)으로 돌아앉음
+      scene.add(opp.group);
+      opp.update(performance.now());
+    }
+    requestRender();
   }
 
   // ── 칸 표시: 마지막 수, 고른 칸, 둘 수 있는 칸, 체크 ──
@@ -424,12 +446,17 @@ export async function createBoard3D(onSquareClick: (index: number) => void, them
 
   // ── 카메라 ──
   let flipped = false;
-  let view: CameraView = 'angle';
+  let view: CameraView = 'seat';
   function placeCamera() {
     const side = flipped ? -1 : 1; // 흑 쪽에서 보면 반대편
     requestRender();
-    if (view === 'top') camera.position.set(0, 14, 0.01 * side);
-    else camera.position.set(0, 10.5, 11.8 * side); // 판 전체가 들어오게 조금 멀리서
+    if (view === 'top') { camera.position.set(0, 14, 0.01 * side); controls.target.set(0, 0, 0); }
+    else if (view === 'angle') { camera.position.set(0, 10.5, 11.8 * side); controls.target.set(0, 0, 0); } // 판 전체가 들어오게 조금 멀리서
+    else {
+      // 앉아서: 의자에 앉은 눈높이. 판 너머 상대의 얼굴까지 보이게 조금 위를 봄
+      camera.position.set(0, 7, 14.5 * side);
+      controls.target.set(0, 2.2, -2.5 * side);
+    }
     camera.up.set(0, 1, 0);
     controls.update();
   }
@@ -489,12 +516,23 @@ export async function createBoard3D(onSquareClick: (index: number) => void, them
     stepTweens(now);
     const falling = stepFall(now);
     controls.update(); // 손을 뗀 뒤 부드럽게 멈추는 중이면 'change'가 와서 다시 그림
-    if (!moving && !falling && !needsRender) return;
+    // 상대 캐릭터: 손 뻗기·고개 숙이기 중이면 매번, 가만히 숨만 쉴 때는 초당 약 12장만 (배터리 아끼기)
+    // 한 장 그리는 데 오래 걸리는 기기(느린 휴대폰)면 숨쉬기 장면을 더 드물게: 그리는 시간의 4배 이상 쉼
+    let acting = false;
+    if (opp) {
+      acting = opp.update(now);
+      if (!acting && now - lastIdleFrame > Math.max(1000 / 12, frameCost * 4)) { lastIdleFrame = now; needsRender = true; }
+    }
+    if (!moving && !falling && !acting && !needsRender) return;
     needsRender = false;
+    const t0 = performance.now();
     if (composer) composer.render(); else renderer.render(scene, camera);
+    frameCost = frameCost * 0.8 + (performance.now() - t0) * 0.2; // 최근 몇 장의 평균
     renders++;
   });
   let renders = 0; // 테스트용: 지금까지 그린 횟수
+  let lastIdleFrame = 0;
+  let frameCost = 0; // 한 장 그리는 데 걸린 시간(ms), 평균
 
   // ── 바깥에서 부르는 함수 ──
   let current: Board3DState | null = null;
@@ -505,6 +543,9 @@ export async function createBoard3D(onSquareClick: (index: number) => void, them
     update(state) {
       const prev = current;
       if (state.flipped !== flipped) { flipped = state.flipped; placeCamera(); }
+      const o = state.opponent;
+      setOpponent(o ? `${o.id}:${o.color}` : '');
+      opp?.setLost(!!o?.lost);
       // 새 수 하나가 둬진 거면 움직임으로, 아니면(무르기·다시 시작) 바로 맞춤
       const newMove = prev !== null && state.lastMove !== null && state.lastMove !== prev.lastMove;
       let animated = false;
@@ -517,7 +558,14 @@ export async function createBoard3D(onSquareClick: (index: number) => void, them
           const q = state.game.board[i];
           return (p?.color === q?.color) && (p?.type === q?.type);
         });
-        if (sameBoard) { finishTweens(); animateMove(prev!.game, state.lastMove!, state.game); animated = true; }
+        if (sameBoard) {
+          finishTweens();
+          // 상대 캐릭터의 수면 손을 뻗어서 밀고, 손이 닿은 뒤에 기물이 출발
+          const delay = opp && o && mover.color === o.color
+            ? opp.reach(squarePosition(state.lastMove!.from), squarePosition(state.lastMove!.to), MOVE_TIME) : 0;
+          animateMove(prev!.game, state.lastMove!, state.game, delay);
+          animated = true;
+        }
       }
       if (!animated) {
         // 움직이는 중에 화면만 다시 그려진 거면(판은 그대로) 움직임을 끊지 않음
@@ -534,10 +582,12 @@ export async function createBoard3D(onSquareClick: (index: number) => void, them
     },
     setTheme(id) { finishTweens(); applyTheme(id); },
     setView(v) { view = v; placeCamera(); },
+    moveLandsIn: () => Math.max(0, landingAt - performance.now()),
     // 화면을 다시 그리는 동안엔 이 상자가 잠깐 떨어져 있어서(너비 0) 바로 맞추면 무시됨 → 다음 화면 갱신 때 맞춤
     setRightInset(px) { if (px !== rightInset) { rightInset = px; requestAnimationFrame(resize); } },
     renderCount: () => renders,
     dispose() {
+      setOpponent('');
       renderer.setAnimationLoop(null);
       observer.disconnect();
       controls.dispose();

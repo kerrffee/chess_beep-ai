@@ -36,7 +36,13 @@ const remember = (key: string, fallback: string) => { try { return localStorage.
 const keep = (key: string, value: string) => { try { localStorage.setItem(key, value); } catch { /* 저장 못 하면 그냥 넘어감 */ } };
 let use3D = remember('chess.view', '3d') === '3d'; // 처음 오면 3D
 let theme3D = remember('chess.theme', 'classic');
-let view3D: CameraView = 'angle';
+const VIEW_LIST: { value: CameraView; label: string }[] = [
+  { value: 'seat', label: '시점: 앉아서' },
+  { value: 'angle', label: '시점: 비스듬히' },
+  { value: 'top', label: '시점: 위에서' },
+];
+let view3D = remember('chess.camera', 'seat') as CameraView;
+if (!VIEW_LIST.some(v => v.value === view3D)) view3D = 'seat';
 let board3D: Board3D | null = null;
 let loading3D = false;
 let error3D = '';
@@ -64,7 +70,7 @@ function soundForNewMoves() {
   const count = G.moveTexts.length;
   if (count > heardMoves && soundOn) {
     const san = G.moveTexts[count - 1];
-    if (use3D && board3D) setTimeout(() => playMoveSound(san), 300);
+    if (use3D && board3D) setTimeout(() => playMoveSound(san), board3D.moveLandsIn()); // 기물이 내려앉는 순간
     else playMoveSound(san);
   }
   heardMoves = count; // 무르기로 줄어들면 그대로 따라감
@@ -219,10 +225,16 @@ function renderPlay(app: HTMLElement) {
   let boardEl: HTMLElement;
   if (use3D && board3D) {
     // 3D 판: 같은 상자를 계속 다시 붙여 씀 (새로 만들면 느려서)
+    // 판 건너편 상대: 사람 vs AI일 때만 (AI 쪽 색 = 내 반대 색)
+    const aiColor: Color = G.playerColor === 'w' ? 'b' : 'w';
+    const mate = gameStatus(G.game, G.history) === 'checkmate';
+    const opponent = watching || G.opponent === 'human' ? null : {
+      id: G.opponent, color: aiColor,
+      lost: (mate && G.game.turn === aiColor) || G.resigned === aiColor,
+    };
     board3D.update({
       game: G.game, lastMove: G.lastMove, selected: G.selected, targets: G.targets, flipped,
-      inCheck: inCheck(G.game, G.game.turn),
-      checkmate: gameStatus(G.game, G.history) === 'checkmate',
+      inCheck: inCheck(G.game, G.game.turn), checkmate: mate, opponent,
     });
     boardEl = board3D.element;
     // 넓은 화면에서 오른쪽 설정 판을 펴 두면, 판을 그 왼쪽 남은 자리 가운데로 (휴대폰은 아래에서 올라오는 시트라 그대로)
@@ -268,9 +280,10 @@ function renderPlay(app: HTMLElement) {
       board3D?.setTheme(v);
       render();
     }));
-    viewRow.appendChild(makeButton(view3D === 'angle' ? '위에서 보기' : '비스듬히 보기', () => {
-      view3D = view3D === 'angle' ? 'top' : 'angle';
-      board3D?.setView(view3D);
+    viewRow.appendChild(makeSelect('opponent view-select', VIEW_LIST, view3D, v => {
+      view3D = v;
+      keep('chess.camera', v);
+      board3D?.setView(v);
       render();
     }));
   }
