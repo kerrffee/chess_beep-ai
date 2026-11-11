@@ -17,6 +17,13 @@ await sq(52).click(); await sq(36).click();
 await p.waitForFunction(() => document.querySelector('.info').textContent.startsWith('백 차례'), null, { timeout: 15000 });
 ok((await p.$$('.move-row')).length === 1, '대국: e4에 AI가 응수 ' + JSON.stringify(await p.$$eval('.move-row', r => r.map(x => x.textContent))));
 
+// 1-2) 대국을 파일 저장 없이 "기보 보기로 열기" → 마지막 장면부터, 대국은 그대로
+await p.click('text=기보 보기로 열기');
+ok((await p.textContent('.info')).includes('진행 중'), '기보 보기로 열기: ' + await p.textContent('.info'));
+ok(/^2수 중 2번째/.test(await depth()), '마지막 장면부터: ' + await depth());
+await tab('대국');
+ok((await p.$$('.move-row')).length === 1, '대국 탭으로 돌아오면 그대로');
+
 // 2) 리그: 대가·욕심쟁이·혼돈만
 await tab('리그');
 const names = await p.$$eval('.league-picks label', ls => ls.map(l => l.textContent.trim()));

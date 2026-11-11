@@ -9,7 +9,7 @@ import { squareName } from './notation';
 import * as G from './game'; // 게임 진행 담당 (판 상태, 수 두기, AI, 대사 …)
 
 import { SYMBOLS, drawBoard, drawMoveList, makeButton, makeSelect, scrollMoves } from './view';
-import { downloadText, pgnFilename, sansOf } from './pgn';
+import { downloadText, parsePGN, pgnFilename, sansOf } from './pgn';
 import { renderLeague, type LeagueGame } from './league';
 import { renderReplay, openGame, stopAuto } from './replay';
 
@@ -256,6 +256,7 @@ function renderPlay(app: HTMLElement) {
   buttons.appendChild(makeButton('무르기', G.undo, G.snapshots.length === 0 && !G.resigned));
   buttons.appendChild(makeButton('다시 시작', G.restart));
   buttons.appendChild(makeButton('기보 저장', downloadPGN, G.moveTexts.length === 0));
+  buttons.appendChild(makeButton('기보 보기로 열기', openCurrentInReplay, G.moveTexts.length === 0));
   app.appendChild(buttons);
 
   // ④ 보기: 2D/3D 전환, (3D일 때) 테마·시점
@@ -322,6 +323,15 @@ function scoreGraph(): HTMLElement {
 // 기보 저장: PGN(체스 기보 표준 형식) 파일로 내려받기. 다른 체스 사이트·앱이나 "기보 보기"에서 열 수 있음
 function downloadPGN() {
   downloadText(G.pgnText(), pgnFilename());
+}
+
+// 지금 대국을 파일 저장 없이 "기보 보기" 탭에서 바로 열기 (마지막 장면부터)
+// 대국은 그대로 남아서, 대국 탭으로 돌아오면 이어서 둘 수 있음
+function openCurrentInReplay() {
+  const loaded = parsePGN(G.pgnText());
+  if (typeof loaded === 'string') return; // 우리가 만든 PGN이라 실패할 일은 없음
+  openGame(loaded, true);
+  switchScreen('replay');
 }
 
 // 프로모션 고르기 창: 퀸·룩·비숍·나이트 + 취소

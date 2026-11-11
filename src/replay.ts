@@ -14,10 +14,11 @@ const state = {
 let timer: number | null = null;
 const AUTO_DELAY = 800; // 자동 재생 한 수 간격(ms)
 
-export function openGame(g: LoadedGame) {
+// atEnd: 마지막 장면부터 보여 주기 (방금 끝난 대국을 바로 열 때)
+export function openGame(g: LoadedGame, atEnd = false) {
   stopAuto();
   state.game = g;
-  state.index = 0;
+  state.index = atEnd ? g.moves.length : 0;
   state.error = '';
 }
 
@@ -67,7 +68,7 @@ export function renderReplay(app: HTMLElement, rerender: () => void,
   info.className = 'info';
   if (state.error) info.textContent = '불러오기 실패: ' + state.error;
   else if (!g) info.textContent = '저장한 기보(.pgn)를 불러오거나, 리그에서 "다시 보기"를 누르세요';
-  else info.textContent = `${g.white}(백) vs ${g.black}(흑) · ${g.result.replace('1/2-1/2', '무승부')}`;
+  else info.textContent = `${g.white}(백) vs ${g.black}(흑) · ${g.result.replace('1/2-1/2', '무승부').replace('*', '진행 중')}`;
   app.appendChild(info);
   if (!g) return;
 
