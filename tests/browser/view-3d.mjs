@@ -26,6 +26,10 @@ const r2 = await p.evaluate(() => window.__chess3dRenders());
 ok(r2 - r1 <= 1, `가만히 있는 2초 동안 그린 횟수: ${r2 - r1}번`);
 
 // 2) 바보 메이트: f3 e5 g4 Qh4# (위에서 본 화면에서 칸 위치 계산)
+// 오른쪽 설정 판이 판 일부를 가리니까 접어 두고 판을 누름
+await p.click('.panel-toggle');
+ok(await p.locator('.panel').count() === 0, '⚙ 버튼으로 설정 판 접기');
+ok(await p.evaluate(() => document.documentElement.scrollHeight <= innerHeight), '3D 화면에 스크롤 없음');
 const box = await p.locator('.board3d canvas').boundingBox();
 const k = 14 * Math.tan(20 * Math.PI / 180);
 const clickSq = async (file, rank) => {
@@ -43,7 +47,9 @@ await p.waitForTimeout(2500);
 const r4 = await p.evaluate(() => window.__chess3dRenders());
 const info = await p.textContent('.info');
 ok(info.includes('체크메이트'), '바보 메이트: ' + info);
-ok(r4 - r3 >= 3, `마지막 수 + 킹이 쓰러지는 동안 그림: ${r4 - r3}번`);
+// 움직임은 시간 기준이라, 화면 없는 크롬처럼 한 장면이 느리면 장면 수가 적음 → "두 번 이상 다시 그렸는지"만 봄
+ok(r4 - r3 >= 2, `마지막 수 + 킹이 쓰러지는 동안 그림: ${r4 - r3}번`);
+await p.click('.panel-toggle'); // 설정 판 다시 펴기
 await p.click('text=비스듬히 보기');
 await p.waitForTimeout(1500);
 await p.locator('.board3d').screenshot({ path: tmp('chess-3d-mate.png') });
@@ -62,5 +68,29 @@ await sqs.nth(53).click(); await sqs.nth(45).click();
 await p.waitForTimeout(300);
 ok((await p.evaluate(() => window.__sounds)) === before, '소리 끄면 안 남');
 await p.click('text=소리 켜기');
+
+// 4) 넓은 화면에서 설정 판을 편 채로: 판이 왼쪽으로 옮겨져도 누른 칸이 맞는지 (e2 → e4)
+const W = 1280, H = 800;
+const p2 = await (await b.newContext({ viewport: { width: W, height: H } })).newPage();
+const errs2 = watchErrors(p2);
+await p2.goto(URL);
+await p2.evaluate(() => localStorage.setItem('chess.view', '3d'));
+await p2.reload();
+await p2.locator('select.opponent').nth(0).selectOption({ label: '사람 (둘이서)' });
+await p2.waitForSelector('.board3d canvas', { timeout: 30000 });
+ok(await p2.locator('.panel').count() === 1, '넓은 화면: 설정 판이 처음부터 펴져 있음');
+await p2.click('text=위에서 보기');
+await p2.waitForTimeout(2500);
+// 위에서 본 화면: 판 가운데가 설정 판 폭(280px)의 절반만큼 왼쪽으로 옮겨져 있음
+const kk = 14 * Math.tan(20 * Math.PI / 180), shift = 280 / 2;
+const click2 = async (file, rank) => {
+  await p2.mouse.click(W / 2 + (file - 3.5) / (kk * W / H) * (W / 2) - shift, H / 2 + (3.5 - rank) / kk * (H / 2));
+  await p2.waitForTimeout(500);
+};
+await click2(4, 1); await click2(4, 3);
+await p2.waitForTimeout(800);
+const rows = await p2.$$eval('.move-row', r => r.map(x => x.textContent));
+ok(rows.length === 1 && rows[0].includes('e4'), '설정 판을 편 채로 판 누르기: ' + JSON.stringify(rows));
+errs.push(...errs2);
 
 await finish(b, errs);

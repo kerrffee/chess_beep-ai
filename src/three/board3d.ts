@@ -34,6 +34,8 @@ export interface Board3D {
   update(state: Board3DState): void;    // 게임 상태가 바뀔 때마다 부름
   setTheme(id: string): void;
   setView(view: CameraView): void;
+  // 오른쪽이 설정 판에 가려지는 폭(px). 판을 남은 자리 가운데로 옮기고, 넘치면 조금 멀리서 봄. 0이면 원래대로
+  setRightInset(px: number): void;
   dispose(): void;
   renderCount(): number; // 테스트용: 지금까지 그린 횟수 (가만히 있을 때 안 늘어나야 함)
 }
@@ -158,6 +160,9 @@ export async function createBoard3D(onSquareClick: (index: number) => void, them
     themeGroup = new THREE.Group();
     scene.add(themeGroup);
     scene.background = new THREE.Color(theme.background);
+    // 먼 바닥은 배경색으로 서서히 흐려지게 (휴대폰 세로 화면처럼 넓게 볼 때 바닥 끝 경계선이 안 보이게)
+    // 판과 기물은 카메라에서 25보다 가까워서 영향 없음
+    scene.fog = new THREE.Fog(theme.background, 25, 60);
     scene.environmentIntensity = theme.envIntensity;
     ambient.intensity = theme.ambient;
     sun.color.set(theme.sunColor);
@@ -190,7 +195,7 @@ export async function createBoard3D(onSquareClick: (index: number) => void, them
       frame.receiveShadow = frame.castShadow = true;
       themeGroup.add(frame);
     }
-    const floor = new THREE.Mesh(new THREE.PlaneGeometry(60, 60),
+    const floor = new THREE.Mesh(new THREE.PlaneGeometry(200, 200),
       new THREE.MeshStandardMaterial({ color: theme.background, roughness: 1 }));
     floor.rotation.x = -Math.PI / 2;
     floor.position.y = boardBottom - 0.001;
@@ -451,11 +456,22 @@ export async function createBoard3D(onSquareClick: (index: number) => void, them
   });
 
   // ── 크기: 상자 크기가 바뀌면 맞춤 ──
+  let rightInset = 0; // 오른쪽이 가려지는 폭(px)
   const resize = () => {
     const w = element.clientWidth, h = element.clientHeight;
     if (w === 0 || h === 0) return;
     renderer.setSize(w, h, false);
     camera.aspect = w / h;
+    // 판이 들어갈 자리의 너비 = 전체 너비 − 가려지는 폭 (너무 좁으면 가림막을 무시)
+    const inset = w - rightInset >= 300 ? rightInset : 0;
+    const free = w - inset;
+    // 자리가 세로로 길면(휴대폰 전체 화면, 설정 판을 편 좁은 창) 판 양옆이 잘리지 않게 위아래 시야각을 넓힘
+    // (가로 시야를 정사각형일 때와 같게 유지: tan(세로/2) = tan(40°/2) × 높이 ÷ 너비)
+    camera.fov = free >= h ? 40 : THREE.MathUtils.radToDeg(2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(20)) * h / free));
+    // 그림 전체를 가린 폭의 절반만큼 왼쪽으로 밀어서, 판이 남은 자리 가운데에 오게
+    // (클릭 위치 계산도 같은 카메라를 써서 그대로 맞음)
+    if (inset > 0) camera.setViewOffset(w, h, inset / 2, 0, w, h);
+    else camera.clearViewOffset();
     camera.updateProjectionMatrix();
     resizeComposer();
     requestRender();
@@ -518,6 +534,8 @@ export async function createBoard3D(onSquareClick: (index: number) => void, them
     },
     setTheme(id) { finishTweens(); applyTheme(id); },
     setView(v) { view = v; placeCamera(); },
+    // 화면을 다시 그리는 동안엔 이 상자가 잠깐 떨어져 있어서(너비 0) 바로 맞추면 무시됨 → 다음 화면 갱신 때 맞춤
+    setRightInset(px) { if (px !== rightInset) { rightInset = px; requestAnimationFrame(resize); } },
     renderCount: () => renders,
     dispose() {
       renderer.setAnimationLoop(null);

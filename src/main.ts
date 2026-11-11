@@ -34,12 +34,14 @@ function switchScreen(next: Screen) {
 // 고른 보기·테마는 브라우저에 기억해 둠 (다음에 들어와도 그대로)
 const remember = (key: string, fallback: string) => { try { return localStorage.getItem(key) ?? fallback; } catch { return fallback; } };
 const keep = (key: string, value: string) => { try { localStorage.setItem(key, value); } catch { /* 저장 못 하면 그냥 넘어감 */ } };
-let use3D = remember('chess.view', '2d') === '3d';
+let use3D = remember('chess.view', '3d') === '3d'; // 처음 오면 3D
 let theme3D = remember('chess.theme', 'classic');
 let view3D: CameraView = 'angle';
 let board3D: Board3D | null = null;
 let loading3D = false;
 let error3D = '';
+// 3D 대국 화면의 오른쪽 설정 판: 넓은 화면은 처음에 펼쳐 두고, 휴대폰은 접어 둠
+let panelOpen = window.innerWidth > 760;
 const THEME_LIST = [ // themes.ts의 THEMES와 같은 순서 (3D를 켜기 전에는 그 파일을 불러오지 않아서 따로 적음)
   { value: 'classic', label: '테마: 클래식' },
   { value: 'marble', label: '테마: 대리석' },
@@ -120,6 +122,8 @@ function openLeagueGame(g: LeagueGame) {
 function render() {
   const app = document.querySelector<HTMLDivElement>('#app')!;
   app.innerHTML = '';
+  // 3D 대국 화면이면 여백 없이 판이 화면 전체를 채움 (style.css의 body.full3d)
+  document.body.classList.toggle('full3d', screen === 'play' && use3D);
 
   // 맨 위 탭: 대국 / 리그 / 기보 보기
   const tabs = document.createElement('div');
@@ -140,6 +144,7 @@ function render() {
         wait.textContent = '3D 판을 불러오는 중…';
         return wait;
       }
+      board3D.setRightInset(0); // 기보 보기의 3D 판은 상자 안이라 가림막 없음
       board3D.update({
         game: pos, lastMove: last, selected: null, targets: [], flipped: false,
         inCheck: inCheck(pos, pos.turn), checkmate: gameStatus(pos, []) === 'checkmate',
@@ -156,7 +161,7 @@ function render() {
 function renderPlay(app: HTMLElement) {
   const watching = G.opponent === 'watch';
 
-  // ① 맨 위: 상대 / (내 색 또는 백·흑 AI) / 생각 시간
+  // ① 고르기 상자들: 상대 / (내 색 또는 백·흑 AI) / 생각 시간
   const controls = document.createElement('div');
   controls.className = 'controls';
   controls.appendChild(makeSelect('opponent', G.OPPONENTS, G.opponent, G.setOpponent));
@@ -177,7 +182,6 @@ function renderPlay(app: HTMLElement) {
     // 생각 시간은 바꿔도 게임이 이어짐 (다음 수부터 적용)
     controls.appendChild(makeSelect('opponent', G.THINK_TIMES, G.thinkTime, G.setThinkTime));
   }
-  app.appendChild(controls);
 
   // 고른 상대의 성격 한 줄 설명
   const personaInfo = document.createElement('div');
@@ -185,12 +189,10 @@ function renderPlay(app: HTMLElement) {
   personaInfo.textContent = G.opponent === 'human' ? '한 화면에서 둘이 번갈아 둠'
     : watching ? `${findPersonality(G.watchAI.w).name}(백) vs ${findPersonality(G.watchAI.b).name}(흑)`
     : findPersonality(G.opponent).description;
-  app.appendChild(personaInfo);
 
   const info = document.createElement('div');
   info.className = 'info';
   info.textContent = G.statusText();
-  app.appendChild(info);
 
   // 생각하는 AI가 지난 수에서 몇 수 앞까지 봤는지 (구경할 때는 해설)
   const depthInfo = document.createElement('div');
@@ -198,11 +200,11 @@ function renderPlay(app: HTMLElement) {
   depthInfo.textContent = watching ? G.commentary
     : G.aiBook ? 'AI가 좋아하는 오프닝으로 둠'
     : G.aiDepth > 0 ? `AI가 지난 수에서 ${G.aiDepth}수 앞까지 봄` : '';
-  app.appendChild(depthInfo);
 
   // AI의 말풍선 (사람끼리 둘 때는 없음). 비어 있어도 자리를 지켜서 판이 들썩이지 않게
+  let bubble: HTMLElement | null = null;
   if (G.opponent !== 'human') {
-    const bubble = document.createElement('div');
+    bubble = document.createElement('div');
     bubble.className = 'speech' + (G.speech ? '' : ' empty');
     const who = document.createElement('span');
     who.className = 'speaker';
@@ -210,15 +212,11 @@ function renderPlay(app: HTMLElement) {
     const words = document.createElement('span');
     words.textContent = G.speech ? G.speech.text : '';
     bubble.append(who, words);
-    app.appendChild(bubble);
   }
 
-  // ② 가운데: 판 + (기보, 형세 그래프)
-  const middle = document.createElement('div');
-  middle.className = 'middle';
-
-  // 내가 흑이면 판을 뒤집어서 내 기물이 아래에 오게 (구경할 때는 항상 백이 아래)
+  // ② 판. 내가 흑이면 판을 뒤집어서 내 기물이 아래에 오게 (구경할 때는 항상 백이 아래)
   const flipped = !watching && G.playerColor === 'b';
+  let boardEl: HTMLElement;
   if (use3D && board3D) {
     // 3D 판: 같은 상자를 계속 다시 붙여 씀 (새로 만들면 느려서)
     board3D.update({
@@ -226,28 +224,28 @@ function renderPlay(app: HTMLElement) {
       inCheck: inCheck(G.game, G.game.turn),
       checkmate: gameStatus(G.game, G.history) === 'checkmate',
     });
-    middle.appendChild(board3D.element);
+    boardEl = board3D.element;
+    // 넓은 화면에서 오른쪽 설정 판을 펴 두면, 판을 그 왼쪽 남은 자리 가운데로 (휴대폰은 아래에서 올라오는 시트라 그대로)
+    board3D.setRightInset(panelOpen && window.innerWidth > 760 ? 280 : 0);
   } else if (use3D) {
     // 3D를 불러오는 중
-    const wait = document.createElement('div');
-    wait.className = 'board3d board3d-loading';
-    wait.textContent = '3D 판을 불러오는 중…';
-    middle.appendChild(wait);
+    boardEl = document.createElement('div');
+    boardEl.className = 'board3d board3d-loading';
+    boardEl.textContent = '3D 판을 불러오는 중…';
     ensure3D();
   } else {
-    middle.appendChild(drawBoard(G.game, {
+    boardEl = drawBoard(G.game, {
       flipped, lastMove: G.lastMove, selected: G.selected, targets: G.targets, onClick: G.onSquareClick,
-    }));
+    });
   }
 
+  // 기보 + 형세 그래프
   const side = document.createElement('div');
   side.className = 'side';
   side.appendChild(drawMoveList(G.moveTexts, G.firstTurn));
   side.appendChild(scoreGraph());
-  middle.appendChild(side);
-  app.appendChild(middle);
 
-  // ③ 아래: 버튼들
+  // ③ 버튼들
   const buttons = document.createElement('div');
   buttons.className = 'controls';
   if (watching) {
@@ -257,9 +255,8 @@ function renderPlay(app: HTMLElement) {
   buttons.appendChild(makeButton('다시 시작', G.restart));
   buttons.appendChild(makeButton('기보 저장', downloadPGN, G.moveTexts.length === 0));
   buttons.appendChild(makeButton('기보 보기로 열기', openCurrentInReplay, G.moveTexts.length === 0));
-  app.appendChild(buttons);
 
-  // ④ 보기: 2D/3D 전환, (3D일 때) 테마·시점
+  // ④ 보기: 2D/3D 전환, 소리, (3D일 때) 테마·시점
   const viewRow = document.createElement('div');
   viewRow.className = 'controls';
   viewRow.appendChild(makeButton(use3D ? '2D로 보기' : '3D로 보기', toggle3D));
@@ -277,12 +274,41 @@ function renderPlay(app: HTMLElement) {
       render();
     }));
   }
-  app.appendChild(viewRow);
+  let err: HTMLElement | null = null;
   if (error3D) {
-    const err = document.createElement('div');
+    err = document.createElement('div');
     err.className = 'persona-info';
     err.textContent = error3D;
-    app.appendChild(err);
+  }
+
+  if (use3D) {
+    // ── 3D: 판이 화면 전체. 상태·말풍선은 왼쪽 위에 작게, 나머지는 오른쪽 접이식 판(⚙)에 ──
+    app.appendChild(boardEl);
+    const hud = document.createElement('div');
+    hud.className = 'hud';
+    hud.append(info, depthInfo);
+    if (bubble) hud.appendChild(bubble);
+    app.appendChild(hud);
+
+    const toggle = makeButton(panelOpen ? '✕' : '⚙ 설정', () => { panelOpen = !panelOpen; render(); }, false, 'panel-toggle');
+    app.appendChild(toggle);
+    if (panelOpen) {
+      const panel = document.createElement('div');
+      panel.className = 'panel';
+      panel.append(controls, personaInfo, buttons, viewRow);
+      if (err) panel.appendChild(err);
+      panel.appendChild(side);
+      app.appendChild(panel);
+    }
+  } else {
+    // ── 2D: 예전처럼 위에서 아래로 ──
+    app.append(controls, personaInfo, info, depthInfo);
+    if (bubble) app.appendChild(bubble);
+    const middle = document.createElement('div');
+    middle.className = 'middle';
+    middle.append(boardEl, side);
+    app.append(middle, buttons, viewRow);
+    if (err) app.appendChild(err);
   }
 
   if (G.pendingPromotion) app.appendChild(promotionPicker());
@@ -369,6 +395,9 @@ function promotionPicker(): HTMLElement {
 }
 
 G.onChange(render); // 게임 상태가 바뀌면 화면을 다시 그림
+// 창 너비가 휴대폰/넓은 화면 경계(760px)를 넘나들면 설정 판 배치가 바뀌니까 다시 그림
+let wasWide = window.innerWidth > 760;
+window.addEventListener('resize', () => { const wide = window.innerWidth > 760; if (wide !== wasWide) { wasWide = wide; render(); } });
 // 테스트용: 3D 판을 몇 번 그렸는지 (가만히 있을 때 안 늘어나는지 확인)
 Object.assign(window, { __chess3dRenders: () => board3D?.renderCount() ?? 0 });
 render();

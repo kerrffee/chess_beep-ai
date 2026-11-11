@@ -341,3 +341,114 @@ body {
   color: #aaa;
   font-family: sans-serif;
 }
+
+/* ---------- 3D 대국: 판이 화면 전체, 나머지는 위에 띄움 ---------- */
+body.full3d {
+  padding: 0;
+  overflow: hidden;      /* 스크롤 없음 */
+  background: #111;
+}
+/* 판: 화면 전체 */
+body.full3d .board3d {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;        /* 휴대폰 주소창 높이를 뺀 진짜 화면 높이 */
+  border-radius: 0;
+  z-index: 0;
+}
+/* 맨 위 가운데 탭: 작게 */
+body.full3d .tabs {
+  position: fixed;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2;
+  background: rgba(30, 30, 30, 0.7);
+  backdrop-filter: blur(6px);
+}
+body.full3d .tab { padding: 6px 12px; font-size: 13px; }
+
+/* 왼쪽 위: 상태 + AI가 본 깊이 + 말풍선. 판을 누르는 데 방해되지 않게 클릭은 통과 */
+.hud {
+  position: fixed;
+  top: 10px;
+  left: 10px;
+  z-index: 1;
+  max-width: min(340px, calc(100vw - 20px));
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  pointer-events: none;
+}
+.hud .info {
+  font-size: 18px;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
+}
+.hud .depth-info {
+  font-size: 12px;
+  color: #ccc;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+  min-height: 0;
+}
+.hud .speech {
+  width: auto;
+  min-height: 0;
+  font-size: 14px;
+  background: rgba(244, 234, 213, 0.92);
+}
+.hud .speech.empty { display: none; }
+
+/* 오른쪽 위 설정 버튼 */
+.panel-toggle {
+  position: fixed;
+  top: 10px;
+  right: 10px;
+  z-index: 3;
+  padding: 7px 12px;
+  font-size: 14px;
+  border: none;
+  border-radius: 8px;
+  background: rgba(30, 30, 30, 0.75);
+  color: #eee;
+  cursor: pointer;
+  backdrop-filter: blur(6px);
+}
+.panel-toggle:hover { background: rgba(60, 60, 60, 0.85); }
+
+/* 오른쪽 접이식 설정 판: 고르기 상자, 버튼, 보기 설정, 기보, 형세 그래프 */
+.panel {
+  position: fixed;
+  top: 52px;
+  right: 10px;
+  bottom: 10px;
+  z-index: 2;
+  width: 260px;
+  box-sizing: border-box;
+  padding: 12px;
+  border-radius: 10px;
+  background: rgba(30, 30, 30, 0.78);
+  backdrop-filter: blur(8px);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow-y: auto;
+}
+.panel .controls { flex-wrap: wrap; gap: 6px; }
+.panel .opponent { font-size: 13px; padding: 5px 8px; max-width: 100%; }
+.panel .restart { font-size: 13px; padding: 6px 10px; }
+.panel .persona-info { text-align: left; padding: 0; font-size: 12px; }
+.panel .side { width: 100%; height: auto; flex: 1; min-height: 180px; }
+.panel .moves { background: rgba(0, 0, 0, 0.3); }
+.panel .graph { background: rgba(0, 0, 0, 0.3); }
+
+/* 휴대폰: 탭은 왼쪽 아래, 상태는 왼쪽 위, 설정 판은 아래에서 올라오는 시트 */
+@media (max-width: 760px) {
+  body.full3d .tabs { top: auto; bottom: 10px; left: 10px; transform: none; }
+  .hud { max-width: calc(100vw - 110px); }
+  .hud .info { font-size: 15px; }
+  .panel { top: auto; bottom: 56px; left: 10px; right: 10px; width: auto; max-height: 60vh; }
+  .panel .side { min-height: 140px; }
+  .panel .moves { height: 90px; flex: none; }
+}
