@@ -160,6 +160,7 @@ export async function createBoard3D(onSquareClick: (index: number) => void, them
   }
 
   // ── 테마 적용: 배경, 조명 세기, 판, 바닥, 기물 재질 ──
+  let room: THREE.Group | null = null;
   function applyTheme(id: string) {
     theme = THEMES.find(t => t.id === id) ?? CLASSIC;
     scene.remove(themeGroup);
@@ -200,7 +201,9 @@ export async function createBoard3D(onSquareClick: (index: number) => void, them
     }
     // 방: 판은 책상 위에 놓임 (책상 윗면 = 판 밑면)
     deskTop = boardBottom - 0.001;
-    themeGroup.add(buildRoom(theme.id, deskTop));
+    room = buildRoom(theme.id, deskTop, requestRender);
+    room.rotation.y = flipped ? Math.PI : 0; // 흑 쪽에서 보면 방도 돌려서, 늘 같은 방(창문 왼쪽, 소파는 상대 뒤)이 보이게
+    themeGroup.add(room);
     if (opp) setOpponent(oppKey, true); // 책상 높이가 테마마다 조금 달라서 상대도 다시 앉힘
 
     whiteMat = new THREE.MeshPhysicalMaterial(theme.whitePiece);
@@ -542,7 +545,11 @@ export async function createBoard3D(onSquareClick: (index: number) => void, them
     element,
     update(state) {
       const prev = current;
-      if (state.flipped !== flipped) { flipped = state.flipped; placeCamera(); }
+      if (state.flipped !== flipped) {
+        flipped = state.flipped;
+        if (room) room.rotation.y = flipped ? Math.PI : 0;
+        placeCamera();
+      }
       const o = state.opponent;
       setOpponent(o ? `${o.id}:${o.color}` : '');
       opp?.setLost(!!o?.lost);
