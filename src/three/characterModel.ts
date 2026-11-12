@@ -1,9 +1,11 @@
 // ---------- 사람 모양 캐릭터 모델 (뼈대가 있는 .glb) ----------
 // 모델 파일: public/models/character/<이름>.glb (원본은 맥의 ~/Documents/Chees_beep/_model/character)
-//   coward.glb = 겁쟁이 (원본 겁쟁이.fbx를 glb로 바꿈, 그림 없이 색만)
+//   coward.glb = 겁쟁이 (원본 겁쟁이2.glb. 욕심쟁이와 같은 방법. 예전 모델은 겁쟁이.fbx였음)
 //   greedy.glb = 욕심쟁이 (원본 욕심쟁이2.glb. 뼈대가 없는 모델이라 Blender로 뼈대를 만들어 붙이고 자동으로 무게를 줌,
 //                오른손의 사슬 향로는 지움(앉으면 바닥을, 손을 뻗으면 책상을 뚫어서), 삼각형 6만 개·그림 1024px로 줄임)
 //   excuser.glb = 핑계왕 (원본 핑계왕.glb. 욕심쟁이와 같은 방법)
+//   attacker.glb = 돌격대장, queenlover.glb = 퀸 사랑꾼 (원본 돌격대장.glb, 퀸 사랑꾼.glb. 욕심쟁이와 같은 방법)
+//   random.glb = 랜덤 (원본 랜덤.glb. 같은 방법 + 오른손에 든 긴 깃대·깃발은 지움)
 //   bluffer.glb = 허세꾼 (원본 허세꾼.zip의 Character_output.fbx를 Blender로 glb로 바꿈, 갑옷 그림 1024px)
 //                 단위가 m이고 뼈 이름이 'LeftArm' 식이라 unit·rename 설정으로 맞춤 (human.ts)
 //   master.glb(대가), chaos.glb(혼돈)는 뼈대 방식이 달라서 master.ts, ghost.ts가 따로 불러옴

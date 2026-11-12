@@ -1,14 +1,15 @@
 // ---------- 판 건너편에 앉은 상대 캐릭터 ----------
 // 성격마다 모양이 다름. 지금 있는 것:
 //   대가(master): 가면 쓴 로브 인물, 손대지 않고 구슬 빛으로 기물을 움직임 → master.ts
-//   겁쟁이(coward), 욕심쟁이(greedy), 허세꾼(bluffer), 핑계왕(excuser): 뼈대 있는 사람 모델 → human.ts
+//   겁쟁이(coward), 욕심쟁이(greedy), 허세꾼(bluffer), 핑계왕(excuser),
+//   돌격대장(attacker), 랜덤(random), 퀸 사랑꾼(queenlover): 뼈대 있는 사람 모델 → human.ts
 //   혼돈(chaos): 마녀 모자를 쓴 작은 유령 → ghost.ts
 // 캐릭터가 없는 성격은 null (빈 자리)
 //
 // 좌표: 캐릭터는 자기 기준으로 +z(판 쪽)를 바라봄 (자리는 파일마다)
 //       AI가 흑이면 판 뒤쪽(-z)에 그대로, 백이면 판을 돌아 반대편(+z)에 앉도록 통째로 180° 돌림
 import * as THREE from 'three';
-import { createHuman } from './human';
+import { createHuman, type Who } from './human';
 import { createMaster } from './master';
 import { createGhost } from './ghost';
 
@@ -25,10 +26,12 @@ export interface Opponent {
   dispose(): void;
 }
 
+const HUMANS: Who[] = ['coward', 'greedy', 'bluffer', 'excuser', 'attacker', 'random', 'queenlover'];
+
 // 성격 id → 캐릭터 (없으면 null)
 export function createOpponent(id: string, deskTop: number): Opponent | null {
   if (id === 'master') return createMaster(deskTop);
-  if (id === 'coward' || id === 'greedy' || id === 'bluffer' || id === 'excuser') return createHuman(id, deskTop);
+  if (HUMANS.includes(id as Who)) return createHuman(id as Who, deskTop);
   if (id === 'chaos') return createGhost(deskTop);
   return null;
 }

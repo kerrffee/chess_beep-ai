@@ -1,5 +1,5 @@
-# 뼈대 없는 사람 모델(.glb)에 뼈대를 만들어 붙이고 가볍게 줄여서 내보냄 (욕심쟁이2, 핑계왕에 씀)
-# 사용: pip install bpy  →  python3 tools/rig-character.py -- <원본.glb> <결과.glb> <greedy2|excuser>
+# 뼈대 없는 사람 모델(.glb)에 뼈대를 만들어 붙이고 가볍게 줄여서 내보냄 (욕심쟁이2, 핑계왕, 겁쟁이2, 돌격대장, 랜덤, 퀸 사랑꾼에 씀)
+# 사용: pip install bpy  →  python3 tools/rig-character.py -- <원본.glb> <결과.glb> <greedy2|excuser|coward2|attacker|random|queenlover>
 # 그다음 그림 줄이기: npx @gltf-transform/cli resize <결과.glb> <최종.glb> --width 1024 --height 1024
 import bpy, bmesh, sys, mathutils
 from mathutils import Vector
@@ -25,7 +25,45 @@ EX = {  # 핑계왕 (뾰족한 바위 괴물, 걷는 자세: 왼팔·왼다리 �
     'thigh_l': (0.13, -0.20, 0.07), 'calf_l': (0.22, -0.55, 0.10), 'foot_l': (0.25, -0.85, 0.12), 'ball_l': (0.27, -0.92, 0.28), 'ball_end_l': (0.27, -0.92, 0.40),
     'thigh_r': (-0.13, -0.20, -0.05), 'calf_r': (-0.18, -0.55, -0.18), 'foot_r': (-0.21, -0.85, -0.25), 'ball_r': (-0.25, -0.92, -0.12), 'ball_end_r': (-0.25, -0.92, -0.02),
 }
-J = dict(G2 if which == 'greedy2' else EX)
+C2 = {  # 겁쟁이2 (증기 갑옷 로봇, 오른손은 갈고리, 등에 굴뚝)
+    'pelvis': (0, -0.04, 0.0), 'spine_01': (0, 0.05, 0.0), 'spine_02': (0, 0.2, 0.0), 'spine_03': (0, 0.38, 0.0),
+    'neck_01': (0, 0.6, 0.0), 'head': (0, 0.66, 0.03), 'head_end': (0, 0.92, 0.03),
+    'clavicle_l': (0.07, 0.5, 0.0), 'upperarm_l': (0.32, 0.44, -0.03), 'lowerarm_l': (0.34, 0.18, -0.02),
+    'hand_l': (0.45, -0.08, 0.04), 'middle_01_l': (0.47, -0.2, 0.06), 'middle_end_l': (0.47, -0.36, 0.08),
+    'clavicle_r': (-0.07, 0.5, 0.0), 'upperarm_r': (-0.32, 0.44, -0.03), 'lowerarm_r': (-0.31, 0.18, -0.02),
+    'hand_r': (-0.37, -0.1, 0.06), 'middle_01_r': (-0.42, -0.25, 0.1), 'middle_end_r': (-0.42, -0.45, 0.13),
+    'thigh_l': (0.17, -0.08, 0.0), 'calf_l': (0.18, -0.38, 0.04), 'foot_l': (0.2, -0.77, -0.03), 'ball_l': (0.2, -0.9, 0.15), 'ball_end_l': (0.2, -0.9, 0.28),
+}
+AT = {  # 돌격대장 (버섯이 핀 기사, 왼팔에 방패)
+    'pelvis': (0, -0.15, -0.06), 'spine_01': (0, 0.0, -0.06), 'spine_02': (0, 0.17, -0.06), 'spine_03': (0, 0.35, -0.06),
+    'neck_01': (0, 0.57, -0.04), 'head': (0, 0.64, 0.0), 'head_end': (0, 0.92, 0.0),
+    'clavicle_l': (0.07, 0.5, -0.06), 'upperarm_l': (0.22, 0.46, -0.06), 'lowerarm_l': (0.27, 0.2, -0.04),
+    'hand_l': (0.28, 0.13, 0.06), 'middle_01_l': (0.28, 0.13, 0.12), 'middle_end_l': (0.28, 0.13, 0.18),
+    'clavicle_r': (-0.07, 0.5, -0.06), 'upperarm_r': (-0.23, 0.46, -0.06), 'lowerarm_r': (-0.31, 0.18, -0.05),
+    'hand_r': (-0.36, -0.03, -0.02), 'middle_01_r': (-0.37, -0.09, -0.01), 'middle_end_r': (-0.37, -0.14, 0.0),
+    'thigh_l': (0.1, -0.22, -0.05), 'calf_l': (0.12, -0.5, -0.04), 'foot_l': (0.14, -0.83, -0.08), 'ball_l': (0.15, -0.92, 0.06), 'ball_end_l': (0.15, -0.92, 0.15),
+}
+RD = {  # 랜덤 (두건 쓴 방랑자. 오른손에 든 깃대는 지움, 왼발이 앞)
+    'pelvis': (0, -0.15, 0.05), 'spine_01': (0, -0.05, 0.05), 'spine_02': (0, 0.1, 0.05), 'spine_03': (0, 0.24, 0.05),
+    'neck_01': (0, 0.38, 0.04), 'head': (0, 0.45, 0.04), 'head_end': (0, 0.68, 0.04),
+    'clavicle_l': (0.05, 0.33, 0.05), 'upperarm_l': (0.17, 0.3, 0.04), 'lowerarm_l': (0.22, 0.06, 0.04),
+    'hand_l': (0.17, -0.15, 0.1), 'middle_01_l': (0.16, -0.22, 0.12), 'middle_end_l': (0.16, -0.29, 0.13),
+    'clavicle_r': (-0.05, 0.33, 0.05), 'upperarm_r': (-0.17, 0.3, 0.04), 'lowerarm_r': (-0.23, 0.1, 0.02),
+    'hand_r': (-0.29, 0.1, 0.15), 'middle_01_r': (-0.31, 0.08, 0.2), 'middle_end_r': (-0.32, 0.06, 0.25),
+    'thigh_l': (0.09, -0.2, 0.06), 'calf_l': (0.11, -0.55, 0.08), 'foot_l': (0.14, -0.85, 0.05), 'ball_l': (0.15, -0.92, 0.16), 'ball_end_l': (0.15, -0.92, 0.23),
+    'thigh_r': (-0.09, -0.2, 0.03), 'calf_r': (-0.15, -0.55, -0.06), 'foot_r': (-0.19, -0.85, -0.13), 'ball_r': (-0.2, -0.92, -0.04), 'ball_end_r': (-0.2, -0.92, 0.01),
+}
+QL = {  # 퀸 사랑꾼 (후광을 쓴 망토 군주, 두 팔을 앞으로 벌림, 왼발이 앞)
+    'pelvis': (0, -0.15, 0.1), 'spine_01': (0, -0.03, 0.1), 'spine_02': (0, 0.12, 0.1), 'spine_03': (0, 0.28, 0.1),
+    'neck_01': (0, 0.45, 0.1), 'head': (0, 0.52, 0.1), 'head_end': (0, 0.72, 0.1),
+    'clavicle_l': (0.05, 0.4, 0.1), 'upperarm_l': (0.14, 0.38, 0.1), 'lowerarm_l': (0.25, 0.22, 0.22),
+    'hand_l': (0.36, 0.08, 0.32), 'middle_01_l': (0.41, 0.05, 0.36), 'middle_end_l': (0.46, 0.05, 0.4),
+    'clavicle_r': (-0.05, 0.4, 0.1), 'upperarm_r': (-0.14, 0.38, 0.08), 'lowerarm_r': (-0.26, 0.22, 0.1),
+    'hand_r': (-0.36, 0.08, 0.14), 'middle_01_r': (-0.41, 0.05, 0.16), 'middle_end_r': (-0.46, 0.05, 0.18),
+    'thigh_l': (0.1, -0.2, 0.1), 'calf_l': (0.17, -0.52, 0.12), 'foot_l': (0.27, -0.85, 0.15), 'ball_l': (0.28, -0.92, 0.26), 'ball_end_l': (0.28, -0.92, 0.34),
+    'thigh_r': (-0.1, -0.2, 0.08), 'calf_r': (-0.17, -0.52, 0.04), 'foot_r': (-0.25, -0.85, -0.06), 'ball_r': (-0.26, -0.92, 0.03), 'ball_end_r': (-0.26, -0.92, 0.08),
+}
+J = dict({'greedy2': G2, 'excuser': EX, 'coward2': C2, 'attacker': AT, 'random': RD, 'queenlover': QL}[which])
 # 대칭 모델은 오른쪽을 왼쪽에서 거울로
 for k, v in list(J.items()):
     if k.endswith('_l') and k[:-2] + '_r' not in J:
@@ -70,7 +108,21 @@ if which == 'greedy2':
     # 메시가 한 덩어리라서 위치로 자름: 오른쪽 다리 바깥(x < -0.285), 주먹 아래 ~ 향로 바닥(-0.78 < 높이 < -0.17)
     cut = [v for v in bm.verts if v.co.x < -0.285 and -0.78 < v.co.z < -0.17]
     bmesh.ops.delete(bm, geom=cut, context='VERTS')
-    # 자르고 남은 작은 조각도 지움
+    print('향로 지운 점:', len(cut))
+# 랜덤: 오른손에 든 긴 깃대와 깃발, 왼쪽 옆 넝마 자락을 지움 (앉으면 바닥·천장을 뚫고, 팔을 움직이면 늘어나서)
+if which == 'random':
+    def flag(c):  # c: Blender 좌표 → glTF로 (x, 높이 = c.z, 앞 = -c.y)
+        x, y, z = c.x, c.z, -c.y
+        pole = -0.335 < x < -0.275 and 0.13 < z < 0.21 and not (0.06 < y < 0.13)  # 깃대 (주먹 속 부분만 남김)
+        top = y > 0.69 and z > 0.11                                               # 깃대 꼭대기 가로대
+        cloth = x < -0.25 and y > 0.2 and z > 0.03                                # 늘어진 깃발 천
+        rag = x > 0.27 and y < 0.12                                               # 왼쪽 옆에 늘어진 넝마 자락 (팔을 움직이면 부채처럼 늘어나서)
+        return pole or top or cloth or rag
+    cut = [v for v in bm.verts if flag(v.co)]
+    bmesh.ops.delete(bm, geom=cut, context='VERTS')
+    print('깃대·넝마 지운 점:', len(cut))
+# 자르고 남은 작은 조각도 지움
+if which in ('greedy2', 'random'):
     bm.verts.ensure_lookup_table()
     seen = set(); small = []
     for v0 in bm.verts:
@@ -83,7 +135,7 @@ if which == 'greedy2':
                 if w not in seen: seen.add(w); stack.append(w)
         if len(isl) < 300: small += isl
     bmesh.ops.delete(bm, geom=small, context='VERTS')
-    print('향로 지운 점:', len(cut), '+ 조각', len(small))
+    print('작은 조각 지운 점:', len(small))
 bm.to_mesh(me); bm.free()
 print('점', len(me.vertices), '면', len(me.polygons))
 
@@ -124,13 +176,50 @@ for v in me.vertices:
         obj.vertex_groups[nearest_bone(v.co)].add([v.index], 1.0, 'REPLACE'); fixed += 1
 print('자동 무게가 빠진 점(가까운 뼈로 채움):', fixed, '/', len(me.vertices))
 # 손·팔을 따라가는데 손끝보다 한참 아래 있는 점 = 지우다 남은 무기 조각 → 지움 (손을 뻗으면 판 위에 둥둥 뜸)
-low = min(B(J['middle_end_l']).z, B(J['middle_end_r']).z) - 0.08
+low = min(B(J['middle_end_l']).z, B(J['middle_end_r']).z) - (0.08 if which in ('greedy2', 'excuser') else 0.12)
 arm_groups = {g.index for g in obj.vertex_groups if g.name.split('_')[0] in ('upperarm', 'lowerarm', 'hand', 'middle')}
 bad = [v.index for v in me.vertices if v.co.z < low and v.groups and max(v.groups, key=lambda g: g.weight).group in arm_groups]
+if bad and which not in ('greedy2', 'excuser'):
+    # 새 모델들: 무기 조각이 아니라 망토·옷자락이라 지우지 않고, 팔 말고 가장 가까운 몸 뼈를 따라가게 바꿈
+    body = {n: ab for n, ab in segs.items() if n.split('_')[0] not in ('upperarm', 'lowerarm', 'hand', 'middle', 'clavicle')}
+    for i in bad:
+        co = me.vertices[i].co
+        best = min(body, key=lambda n: (co - (body[n][0] + (body[n][1] - body[n][0]) * max(0, min(1, intersect_point_line(co, *body[n])[1])))).length)
+        for g in list(me.vertices[i].groups): obj.vertex_groups[g.group].remove([i])
+        obj.vertex_groups[best].add([i], 1.0, 'REPLACE')
+    print('손보다 낮은데 팔을 따라가던 점 → 몸 뼈로:', len(bad))
+    bad = []
 if bad:
     bm = bmesh.new(); bm.from_mesh(me); bm.verts.ensure_lookup_table()
     bmesh.ops.delete(bm, geom=[bm.verts[i] for i in bad], context='VERTS'); bm.to_mesh(me); bm.free()
 print('손을 따라가던 낮은 조각 지움:', len(bad))
+# 퀸 사랑꾼: 어깨 위(후광·왕관)는 전부 머리를 따라가게, 팔에서 먼 망토 자락은 팔 말고 몸을 따라가게
+if which in ('queenlover', 'random'):
+    body = {n: ab for n, ab in segs.items() if n.split('_')[0] not in ('upperarm', 'lowerarm', 'hand', 'middle', 'clavicle')}
+    armseg = {n: ab for n, ab in segs.items() if n not in body}
+    def seg_d(co, ab):
+        t = max(0, min(1, intersect_point_line(co, *ab)[1])); return (co - (ab[0] + (ab[1] - ab[0]) * t)).length
+    gname = {g.index: g.name for g in obj.vertex_groups}
+    head_n = far_n = 0
+    for v in me.vertices:
+        if not v.groups: continue
+        if which == 'queenlover' and v.co.z > 0.52:
+            for g in list(v.groups): obj.vertex_groups[g.group].remove([v.index])
+            obj.vertex_groups['head'].add([v.index], 1.0, 'REPLACE'); head_n += 1; continue
+        top = gname[max(v.groups, key=lambda g: g.weight).group]
+        # 어깨 뒤 망토: 위팔·빗장뼈를 따라가는데 그 뼈보다 4cm 넘게 뒤에 있음 (팔을 앞으로 뻗으면 망토가 벽처럼 늘어나서)
+        cape = top.split('_')[0] in ('upperarm', 'clavicle') and v.co.y - max(segs[top][0].y, segs[top][1].y) > 0.04
+        far = min(seg_d(v.co, ab) for ab in armseg.values()) > 0.1
+        if top not in armseg and far:
+            # 몸을 주로 따라가는데 팔 무게가 조금 섞인 먼 점 → 팔 무게만 뺌 (팔을 크게 움직이면 판처럼 끌려 나와서)
+            for g in list(v.groups):
+                if gname[g.group] in armseg: obj.vertex_groups[g.group].remove([v.index])
+            continue
+        if cape or (top in armseg and far):
+            best = min(body, key=lambda n: seg_d(v.co, body[n]))
+            for g in list(v.groups): obj.vertex_groups[g.group].remove([v.index])
+            obj.vertex_groups[best].add([v.index], 1.0, 'REPLACE'); far_n += 1
+    print('머리로 고정:', head_n, '/ 팔에서 먼 자락 → 몸 뼈로:', far_n)
 bpy.ops.object.select_all(action='DESELECT'); obj.select_set(True); bpy.context.view_layer.objects.active = obj
 bpy.ops.object.vertex_group_limit_total(group_select_mode='ALL', limit=4)
 bpy.ops.object.vertex_group_normalize_all(lock_active=False)
