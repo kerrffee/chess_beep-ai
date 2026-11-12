@@ -452,3 +452,15 @@ body.full3d .tab { padding: 6px 12px; font-size: 13px; }
   .panel .side { min-height: 140px; }
   .panel .moves { height: 90px; flex: none; }
 }
+
+/* 설정 판의 슬라이더 (시야 앞뒤·높이): 한 줄 전체를 차지 */
+.slider {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  font-size: 14px;
+  color: #ccc;
+}
+.slider input { flex: 1; min-width: 0; accent-color: #c9a46a; }
+.slider-value { width: 2.6em; text-align: right; font-variant-numeric: tabular-nums; }

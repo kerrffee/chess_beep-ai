@@ -14,7 +14,7 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { cloneGame, type GameState } from '../board';
 import { makeMove, type Move } from '../moves';
 import { makePiece, type PieceKind } from './pieces';
-import { CLASSIC, THEMES, type Theme, type WoodLook } from './themes';
+import { CLASSIC, THEMES, withPieceSet, type Theme, type WoodLook } from './themes';
 import { loadModelSet, type ModelSet } from './modelSet';
 import { buildRoom } from './room';
 import { createOpponent, type Opponent } from './opponent';
@@ -37,7 +37,9 @@ export interface Board3D {
   element: HTMLElement;                 // 화면에 붙일 상자 (안에 3D 그림이 있음)
   update(state: Board3DState): void;    // 게임 상태가 바뀔 때마다 부름
   setTheme(id: string): void;
+  setPieceSet(id: string): void; // 체스 세트 고르기 (테마에 pieceSets가 있을 때만 효과)
   setView(view: CameraView): void;
+  setSeat(distance: number, height: number): void; // '앉아서' 시점의 거리(앞뒤)와 눈높이
   moveLandsIn(): number; // 마지막 수의 기물이 내려앉기까지 남은 시간(ms). 효과음을 그때 맞춰 냄
   // 오른쪽이 설정 판에 가려지는 폭(px). 판을 남은 자리 가운데로 옮기고, 넘치면 조금 멀리서 봄. 0이면 원래대로
   setRightInset(px: number): void;
@@ -68,7 +70,7 @@ const MOVE_TIME = 320;
 const FALL_TIME = 700;    // 체크메이트 때 킹이 쓰러지는 시간    // 기물이 움직이는 시간(ms)
 const JUMP_HEIGHT = 0.6;  // 나이트가 뛰어오르는 높이
 
-export async function createBoard3D(onSquareClick: (index: number) => void, themeId = 'classic'): Promise<Board3D> {
+export async function createBoard3D(onSquareClick: (index: number) => void, themeId = 'classic', pieceSetId = 'marble'): Promise<Board3D> {
   const modelSet = await getModelSet();
   const touch = matchMedia('(pointer: coarse)').matches; // 휴대폰·태블릿이면 그림자 품질을 낮춤
 
@@ -94,7 +96,7 @@ export async function createBoard3D(onSquareClick: (index: number) => void, them
   controls.enableDamping = true;            // 손을 떼도 부드럽게 멈춤
   controls.maxPolarAngle = Math.PI * 0.47;  // 판 아래로는 못 내려가게
   controls.minDistance = 5;
-  controls.maxDistance = 22;
+  controls.maxDistance = 55;
   controls.enablePan = false;               // 판이 화면 밖으로 밀려나지 않게
 
   const ambient = new THREE.AmbientLight(0xffffff, 0.15);
@@ -162,7 +164,8 @@ export async function createBoard3D(onSquareClick: (index: number) => void, them
   // ── 테마 적용: 배경, 조명 세기, 판, 바닥, 기물 재질 ──
   let room: THREE.Group | null = null;
   function applyTheme(id: string) {
-    theme = THEMES.find(t => t.id === id) ?? CLASSIC;
+    themeId = id;
+    theme = withPieceSet(THEMES.find(t => t.id === id) ?? CLASSIC, pieceSetId);
     scene.remove(themeGroup);
     themeGroup = new THREE.Group();
     scene.add(themeGroup);
@@ -171,12 +174,22 @@ export async function createBoard3D(onSquareClick: (index: number) => void, them
     ambient.intensity = theme.ambient;
     sun.color.set(theme.sunColor);
     sun.intensity = theme.sunIntensity;
+    sun.castShadow = theme.sunIntensity > 0; // 해를 끈 테마(스포트라이트)는 그림자 계산도 뺌
 
     let boardBottom = -0.37;
     if (theme.modelMaterials && modelSet) {
       const board = modelSet.makeBoard(); // 모델의 원래 판 (대리석)
       themeGroup.add(board);
-      boardBottom = new THREE.Box3().setFromObject(board).min.y;
+      const bb = new THREE.Box3().setFromObject(board);
+      boardBottom = bb.min.y;
+      // 모델 판은 밑면이 없어서 그림자를 못 막음 → 위에서 오는 빛이면 기물 그림자가 판을 뚫고 탁자에 찍힘
+      // 판 바로 밑에 보이지 않는(그림자만 만드는) 얇은 판을 깔아서 막음
+      const size = bb.getSize(new THREE.Vector3());
+      const blocker = new THREE.Mesh(new THREE.BoxGeometry(size.x, 0.02, size.z),
+        new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false }));
+      blocker.position.set((bb.min.x + bb.max.x) / 2, bb.min.y + 0.02, (bb.min.z + bb.max.z) / 2);
+      blocker.castShadow = true;
+      themeGroup.add(blocker);
     } else {
       const lightWood = woodTexture(theme.lightSquare);
       const darkWood = woodTexture(theme.darkSquare);
@@ -450,14 +463,15 @@ export async function createBoard3D(onSquareClick: (index: number) => void, them
   // ── 카메라 ──
   let flipped = false;
   let view: CameraView = 'seat';
+  let seatDistance = 30, seatHeight = 8.4; // '앉아서' 시점: 판 가운데에서 내 쪽으로 떨어진 거리, 판 위 눈높이 (칸 단위)
   function placeCamera() {
     const side = flipped ? -1 : 1; // 흑 쪽에서 보면 반대편
     requestRender();
-    if (view === 'top') { camera.position.set(0, 14, 0.01 * side); controls.target.set(0, 0, 0); }
-    else if (view === 'angle') { camera.position.set(0, 10.5, 11.8 * side); controls.target.set(0, 0, 0); } // 판 전체가 들어오게 조금 멀리서
+    if (view === 'top') { camera.position.set(0, 15.5, 0.01 * side); controls.target.set(0, 0, 0); }
+    else if (view === 'angle') { camera.position.set(0, 12, 15.8 * side); controls.target.set(0, 0, 0); } // 판 전체가 들어오게 조금 멀리서
     else {
-      // 앉아서: 의자에 앉은 눈높이. 판 너머 상대의 얼굴까지 보이게 조금 위를 봄
-      camera.position.set(0, 7, 14.5 * side);
+      // 앉아서: 거리·높이는 설정 판의 슬라이더로 조절 (setSeat)
+      camera.position.set(0, seatHeight, seatDistance * side);
       controls.target.set(0, 2.2, -2.5 * side);
     }
     camera.up.set(0, 1, 0);
@@ -588,7 +602,14 @@ export async function createBoard3D(onSquareClick: (index: number) => void, them
       if (state.checkmate !== wasMate) setKingFall(current); // 체크메이트가 되거나(쓰러짐) 풀릴 때(일어섬)만
     },
     setTheme(id) { finishTweens(); applyTheme(id); },
+    setPieceSet(id) {
+      if (id === pieceSetId) return;
+      pieceSetId = id;
+      finishTweens();
+      applyTheme(themeId);
+    },
     setView(v) { view = v; placeCamera(); },
+    setSeat(d, h) { seatDistance = d; seatHeight = h; if (view === 'seat') placeCamera(); },
     moveLandsIn: () => Math.max(0, landingAt - performance.now()),
     // 화면을 다시 그리는 동안엔 이 상자가 잠깐 떨어져 있어서(너비 0) 바로 맞추면 무시됨 → 다음 화면 갱신 때 맞춤
     setRightInset(px) { if (px !== rightInset) { rightInset = px; requestAnimationFrame(resize); } },

@@ -53,7 +53,40 @@ const THEME_LIST = [ // themes.ts의 THEMES와 같은 순서 (3D를 켜기 전�
   { value: 'marble', label: '테마: 대리석' },
   { value: 'minimal', label: '테마: 미니멀' },
   { value: 'fantasy', label: '테마: 판타지' },
+  { value: 'spotlight', label: '테마: 스포트라이트' },
 ];
+// 체스 세트를 고를 수 있는 테마 (themes.ts의 pieceSets와 맞춤)
+const SET_THEMES = ['spotlight'];
+const PIECE_SET_LIST = [
+  { value: 'marble', label: '체스 세트: 대리석' },
+  { value: 'classic', label: '체스 세트: 클래식' },
+];
+let pieceSet3D = remember('chess.pieceSet', 'marble');
+// '앉아서' 시점의 거리(앞뒤)와 눈높이. 설정 판의 슬라이더로 조절하고 브라우저에 저장
+const SEAT_DEFAULT = { distance: 30, height: 8.4 };
+let seatDistance = Number(remember('chess.seatDistance', String(SEAT_DEFAULT.distance))) || SEAT_DEFAULT.distance;
+let seatHeight = Number(remember('chess.seatHeight', String(SEAT_DEFAULT.height))) || SEAT_DEFAULT.height;
+
+// 이름 + 슬라이더 + 지금 값. 끄는 동안 바로바로 반영 (화면 전체를 다시 그리지 않아서 끌기가 끊기지 않음)
+function makeSlider(label: string, min: number, max: number, step: number, value: number, onInput: (v: number) => void): HTMLElement {
+  const box = document.createElement('label');
+  box.className = 'slider';
+  const name = document.createElement('span');
+  name.textContent = label;
+  const input = document.createElement('input');
+  input.type = 'range';
+  input.min = String(min); input.max = String(max); input.step = String(step); input.value = String(value);
+  const shown = document.createElement('span');
+  shown.className = 'slider-value';
+  shown.textContent = value.toFixed(1);
+  input.addEventListener('input', () => {
+    const v = Number(input.value);
+    shown.textContent = v.toFixed(1);
+    onInput(v);
+  });
+  box.append(name, input, shown);
+  return box;
+}
 
 // ---------- 효과음 ----------
 let soundOn = remember('chess.sound', 'on') === 'on';
@@ -89,8 +122,9 @@ async function ensure3D() {
   try {
     const { createBoard3D } = await import('./three/board3d');
     // 판을 누르면 대국 화면일 때만 수를 둠 (기보 보기에서 누른 건 무시)
-    board3D = await createBoard3D(i => { if (screen === 'play') G.onSquareClick(i); }, theme3D);
+    board3D = await createBoard3D(i => { if (screen === 'play') G.onSquareClick(i); }, theme3D, pieceSet3D);
     board3D.setView(view3D);
+    board3D.setSeat(seatDistance, seatHeight);
   } catch (err) {
     console.error(err);
     // 열어 둔 사이에 새 버전이 배포돼서 3D 파일을 못 찾은 거면, 새로고침해서 새 버전을 받음
@@ -280,12 +314,32 @@ function renderPlay(app: HTMLElement) {
       board3D?.setTheme(v);
       render();
     }));
+    if (SET_THEMES.includes(theme3D)) {
+      viewRow.appendChild(makeSelect('opponent set-select', PIECE_SET_LIST, pieceSet3D, v => {
+        pieceSet3D = v;
+        keep('chess.pieceSet', v);
+        board3D?.setPieceSet(v);
+        render();
+      }));
+    }
     viewRow.appendChild(makeSelect('opponent view-select', VIEW_LIST, view3D, v => {
       view3D = v;
       keep('chess.camera', v);
       board3D?.setView(v);
       render();
     }));
+    if (view3D === 'seat') {
+      viewRow.appendChild(makeSlider('시야 앞뒤', 14, 44, 0.5, seatDistance, v => {
+        seatDistance = v;
+        keep('chess.seatDistance', String(v));
+        board3D?.setSeat(seatDistance, seatHeight);
+      }));
+      viewRow.appendChild(makeSlider('시야 높이', 2, 22, 0.2, seatHeight, v => {
+        seatHeight = v;
+        keep('chess.seatHeight', String(v));
+        board3D?.setSeat(seatDistance, seatHeight);
+      }));
+    }
   }
   let err: HTMLElement | null = null;
   if (error3D) {

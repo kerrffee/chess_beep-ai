@@ -28,6 +28,8 @@ export interface FurnitureOptions {
   stretch?: { from: number; to: number; height: number };
   cheap?: boolean;        // 화면을 넓게 덮는 것(탁자)은 광택 계산이 없는 싼 재질로 (휴대폰에서 빠름)
   shadows?: boolean;      // 그림자를 드리울지 (기본 false: 그림자 계산에서 빼야 휴대폰에서 빠름)
+  height?: number;        // 전체 높이를 이 값(m)으로 맞춤 (모양 비율은 그대로). 단위가 m가 아닌 모델용
+  rotateY?: number;       // 모델을 세로축으로 돌림(라디안). 앞이 +z가 아닌 모델용
 }
 
 // 모델 하나를 복사해서, 바닥 가운데(밑면 y=0, 가로 가운데 x=z=0)가 원점에 오게 놓은 묶음을 돌려줌
@@ -36,7 +38,12 @@ export async function loadFurniture(path: string, opt: FurnitureOptions = {}): P
   const src = await load(path);
   if (!src) return null;
   const copy = src.clone(true);
+  if (opt.rotateY) copy.rotation.y += opt.rotateY;
   copy.updateMatrixWorld(true);
+  if (opt.height) { // 높이 맞추기: 통째로 키우거나 줄임
+    copy.scale.multiplyScalar(opt.height / new THREE.Box3().setFromObject(copy).getSize(new THREE.Vector3()).y);
+    copy.updateMatrixWorld(true);
+  }
   const g = new THREE.Group();
   const sxz = opt.scaleXZ ?? 1;
   const st = opt.stretch;

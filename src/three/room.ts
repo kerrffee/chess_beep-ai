@@ -82,6 +82,7 @@ const FURNITURE: Record<string, FurnitureSet> = {
 // deskTop: 책상 윗면 높이 (= 판 밑면)
 // onLoaded: 가구 모델이 다 불러와지면 부름 (화면을 다시 그리게)
 export function buildRoom(themeId: string, deskTop: number, onLoaded?: () => void): THREE.Group {
+  if (themeId === 'spotlight') return buildSpotlightRoom(deskTop, onLoaded);
   const look = LOOKS[themeId] ?? LOOKS.classic;
   const fur = FURNITURE[themeId];
   const g = new THREE.Group();
@@ -291,4 +292,173 @@ function windowGlass(w: number, h: number, look: RoomLook, x: number, y: number,
   glass.rotation.y = Math.PI / 2;
   glass.position.set(x, y, z);
   return glass;
+}
+
+// ---------- 스포트라이트 방 ----------
+// 벽도 천장도 없는 깜깜한 공간. 바닥, 탁자(대리석 테마 것), 나무 의자만 있고
+// 상대 뒤쪽 높은 곳에서 스포트라이트 하나가 비스듬히 내리쬠 (무대 위 독백처럼)
+// 바닥에는 경계가 또렷한 빛의 원, 공중에는 연기 낀 빛기둥. 빛이 닿지 않는 곳은 완전한 검정
+const SPOT = {
+  from: { x: -50, y: 65, z: -11 }, // 불빛 위치 (판 가운데 기준, y는 탁자 윗면 위 높이). 왼쪽 높은 곳
+                                   // → 앉은 자리에서 빛기둥을 옆으로 비껴 보게 됨 (레퍼런스처럼 대각선 기둥)
+  aimZ: -1,          // 빛이 겨누는 바닥 지점 (판 바로 아래쯤)
+  angle: 0.2,        // 빛 원뿔의 반각(라디안, 약 11°). 멀리서 좁게 쏴서 가는 기둥 + 바닥엔 큰 원
+  penumbra: 0.15,    // 가장자리가 흐려지는 정도 (0 = 칼같이, 1 = 아주 흐리게). 작게 → 원 경계가 또렷
+  intensity: 42000,  // 세기 (거리 제곱으로 약해짐. 불빛이 멀어서 큼)
+  color: 0xfff1e0,   // 아주 살짝 따뜻한 흰빛 (백열 무대 조명 느낌)
+  beam: 0.03,        // 빛기둥(공기 중 연기) 진하기
+  smoke: 0.055,      // 연기 얼룩의 촘촘함 (클수록 잘게)
+};
+const CHAIR_HEIGHT = 1.0;  // 의자 전체 높이(m). 모델 파일의 단위가 제각각이라 이 높이로 맞춤
+const CHAIR_Z = -11.2;     // 의자 가운데 위치 (상대가 앉는 자리 바로 뒤)
+const TABLE_HALF = 7.4;    // 탁자 윗면 절반 너비 (빛기둥 속 탁자 그림자 계산용)
+
+function buildSpotlightRoom(deskTop: number, onLoaded?: () => void): THREE.Group {
+  const g = new THREE.Group();
+  const floorY = deskTop - DESK.height;
+
+  // 바닥: 짙은 회색. 스포트라이트만 받고 방 전체 환경광은 안 받게 셰이더에서 그 부분을 뺌
+  // → 빛의 원 밖은 완전한 검정이라 바닥 끝이 안 보이고, 어둠 속에 빛의 원만 떠 있음
+  const floorMat = new THREE.MeshLambertMaterial({ color: 0x5a5b5e });
+  floorMat.onBeforeCompile = shader => {
+    shader.fragmentShader = shader.fragmentShader.replace('#include <lights_fragment_maps>', '');
+  };
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(200, 200), floorMat);
+  floor.rotation.x = -Math.PI / 2;
+  floor.position.set(0, floorY, 0);
+  floor.receiveShadow = true;
+  g.add(floor);
+
+  // 스포트라이트: 기물·탁자·의자·상대의 그림자를 모두 이 빛이 만듦
+  const apex = new THREE.Vector3(SPOT.from.x, deskTop + SPOT.from.y, SPOT.from.z);
+  const aim = new THREE.Vector3(0, floorY, SPOT.aimZ);
+  const axis = aim.clone().sub(apex).normalize();
+  const spot = new THREE.SpotLight(SPOT.color, SPOT.intensity, 0, SPOT.angle, SPOT.penumbra, 2);
+  spot.position.copy(apex);
+  spot.target.position.copy(aim);
+  spot.castShadow = true;
+  spot.shadow.mapSize.set(2048, 2048);
+  spot.shadow.camera.near = 40;
+  spot.shadow.camera.far = 160;
+  spot.shadow.bias = -0.0004;
+  spot.shadow.radius = 3;
+  g.add(spot, spot.target);
+
+  // 빛기둥: 원뿔 모양 상자를 그리고, 그 안을 지나는 시선마다 연기 농도를 조금씩 더해 감 (레이마칭)
+  // → 겉면만 칠한 원뿔과 달리 진짜 빛 속 연기처럼 보임. 탁자 아래로는 탁자 그림자 때문에 빛이 끊김
+  // 연기 얼룩은 움직이지 않아서, 가만히 있을 때 화면을 계속 다시 그릴 필요 없음
+  const L = 150; // 원뿔 길이 (바닥보다 넉넉히 길게, 바닥 아래는 셰이더가 잘라냄)
+  const beamGeo = new THREE.CylinderGeometry(0.3, Math.tan(SPOT.angle) * L * 1.03, L, 96, 1, true);
+  beamGeo.translate(0, -L / 2, 0); // 꼭짓점을 원점으로
+  beamGeo.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, -1, 0), axis));
+  beamGeo.translate(apex.x, apex.y, apex.z);
+  const beamUniforms = {
+    color: { value: new THREE.Color(SPOT.color) },
+    strength: { value: SPOT.beam },
+    smoke: { value: SPOT.smoke },
+    apex: { value: apex },
+    axis: { value: axis },
+    cosA: { value: Math.cos(SPOT.angle) },
+    floorY: { value: floorY },
+    deskTop: { value: deskTop },
+    tableHalf: { value: TABLE_HALF },
+    camPos: { value: new THREE.Vector3() },
+  };
+  const beam = new THREE.Mesh(beamGeo, new THREE.ShaderMaterial({
+    uniforms: beamUniforms,
+    vertexShader: `
+      varying vec3 vPos;
+      void main() {
+        vPos = position;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }`,
+    fragmentShader: `
+      uniform vec3 color, apex, axis, camPos;
+      uniform float strength, smoke, cosA, floorY, deskTop, tableHalf;
+      varying vec3 vPos;
+      float hash(vec3 p) { return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453); }
+      float noise(vec3 p) {
+        vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+        return mix(mix(mix(hash(i), hash(i + vec3(1,0,0)), f.x), mix(hash(i + vec3(0,1,0)), hash(i + vec3(1,1,0)), f.x), f.y),
+                   mix(mix(hash(i + vec3(0,0,1)), hash(i + vec3(1,0,1)), f.x), mix(hash(i + vec3(0,1,1)), hash(i + vec3(1,1,1)), f.x), f.y), f.z);
+      }
+      bool inCone(vec3 p) { vec3 v = p - apex; return dot(v, axis) > cosA * length(v); }
+      void main() {
+        vec3 toFrag = vPos - camPos;
+        float dFrag = length(toFrag);
+        vec3 rd = toFrag / dFrag;
+        vec3 ro; float len;
+        if (gl_FrontFacing) { ro = vPos; len = 60.0; }          // 바깥에서 볼 때: 원뿔에 들어간 곳부터
+        else { if (!inCone(camPos)) discard; ro = camPos; len = dFrag; } // 빛 속에 서 있을 때: 눈앞부터
+        const int N = 36;
+        float dt = len / float(N);
+        float t = hash(vec3(gl_FragCoord.xy, 1.0)) * dt; // 줄무늬 안 생기게 출발점을 살짝 흩뜨림
+        float sum = 0.0;
+        for (int i = 0; i < N; i++) {
+          vec3 p = ro + rd * t;
+          t += dt;
+          if (p.y < floorY) break;
+          vec3 v = p - apex;
+          float s = dot(v, axis);
+          if (s <= 0.0) continue;
+          float c = s / length(v);
+          float edge = smoothstep(cosA, cosA + (1.0 - cosA) * 0.12, c); // 원뿔 가장자리: 살짝만 흐리게 (기둥 윤곽이 또렷)
+          if (edge <= 0.0) continue;
+          if (p.y < deskTop) { // 탁자 그림자: 불빛에서 이 점까지 가는 길이 탁자 윗면을 지나면 어두움
+            vec3 q = apex + v * ((deskTop - apex.y) / v.y);
+            if (abs(q.x) < tableHalf && abs(q.z) < tableHalf) continue;
+          }
+          vec3 sp = p * smoke;
+          float fog = 0.6 * noise(sp) + 0.4 * noise(sp * 2.7 + 13.1);   // 연기 얼룩
+          float fall = 1.0 / (1.0 + s * s / 6000.0);                     // 불빛에서 멀수록 옅게
+          sum += edge * fall * mix(0.15, 2.0, fog * fog * fog) * dt;
+        }
+        gl_FragColor = vec4(color * strength * sum, 1.0);
+      }`,
+    transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
+  }));
+  beam.renderOrder = 2;
+  beam.frustumCulled = false;
+  beam.onBeforeRender = (_r, _s, cam) => { // 카메라 위치를 방 좌표로 (흑 쪽 시점이면 방이 돌아가 있음)
+    beamUniforms.camPos.value.copy(cam.getWorldPosition(new THREE.Vector3()));
+    beam.worldToLocal(beamUniforms.camPos.value);
+  };
+  g.add(beam);
+
+  // 광원: 빛이 시작되는 작고 하얗게 빛나는 점과 그 둘레의 은은한 빛무리
+  const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.5, 16, 12), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+  bulb.position.copy(apex);
+  g.add(bulb);
+  const glowCanvas = document.createElement('canvas');
+  glowCanvas.width = glowCanvas.height = 64;
+  const gc = glowCanvas.getContext('2d')!;
+  const grad = gc.createRadialGradient(32, 32, 0, 32, 32, 32);
+  grad.addColorStop(0, 'rgba(255,255,255,1)');
+  grad.addColorStop(0.2, 'rgba(235,240,255,0.45)');
+  grad.addColorStop(1, 'rgba(235,240,255,0)');
+  gc.fillStyle = grad;
+  gc.fillRect(0, 0, 64, 64);
+  const glow = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: new THREE.CanvasTexture(glowCanvas), blending: THREE.AdditiveBlending, depthWrite: false, transparent: true,
+  }));
+  glow.scale.set(9, 9, 1);
+  glow.position.copy(apex);
+  g.add(glow);
+  // 탁자(대리석 테마 것) → 의자. 의자는 탁자 뒤, 상대 자리에 판 쪽(+z)을 보게 (이 모델은 앞이 -z라서 180° 돌림)
+  const tableHeight = DESK.height / M;
+  const jobs: Promise<unknown>[] = [];
+  jobs.push(loadFurniture('marble/table.glb', {
+    scaleXZ: 0.6, stretch: { from: 0.06, to: 0.46, height: tableHeight }, shadows: true,
+  }).then(table => {
+    if (!table) return;
+    table.position.y = floorY;
+    g.add(table);
+  }));
+  jobs.push(loadFurniture('spotlight/chair.glb', { height: CHAIR_HEIGHT, rotateY: Math.PI, shadows: true }).then(chair => {
+    if (!chair) return;
+    chair.position.set(0, floorY, CHAIR_Z);
+    g.add(chair);
+  }));
+  Promise.all(jobs).then(() => onLoaded?.());
+  return g;
 }

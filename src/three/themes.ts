@@ -28,6 +28,8 @@ export interface Theme {
   pieceCarving?: boolean;
   // 빛 번짐(후광) 세기: 밝은 부분 주변으로 빛이 퍼져 보이게 함. 0이거나 없으면 끔
   bloom?: number;
+  // 고를 수 있는 체스 세트 (PIECE_SETS의 이름). 있으면 설정 판에 '체스 세트' 고르기가 생김
+  pieceSets?: string[];
 }
 
 export const CLASSIC: Theme = {
@@ -137,5 +139,34 @@ export const FANTASY: Theme = {
   bloom: 0.9, // 기물 주변으로 빛이 은은하게 퍼짐
 };
 
-export const THEMES: Theme[] = [CLASSIC, MARBLE, MINIMAL, FANTASY];
+// 스포트라이트: 깜깜한 방, 천장에서 한 줄기 빛만 탁자 위로 떨어짐
+// 방에는 탁자(대리석 테마 것)와 나무 의자만 있음. 해(방향 빛)는 끄고, 방 안의 스포트라이트 하나로만 비춤
+// 체스 세트는 대리석·클래식 중 고를 수 있음 (pieceSets)
+export const SPOTLIGHT: Theme = {
+  ...CLASSIC,
+  id: 'spotlight',
+  name: '스포트라이트',
+  background: 0x000000, // 완전한 어둠
+  envIntensity: 0.06,   // 반사는 아주 조금만 (빛 밖의 물체 윤곽이 겨우 보일 정도)
+  ambient: 0.0,
+  sunColor: 0xfff1dc,
+  sunIntensity: 0,      // 해는 끔 → 방 안 스포트라이트만
+  pieceSets: ['marble', 'classic'],
+};
+
+export const THEMES: Theme[] = [CLASSIC, MARBLE, MINIMAL, FANTASY, SPOTLIGHT];
+
+// 체스 세트(판·기물 모양)만 다른 테마에서 빌려 옴. 배경·조명은 원래 테마 그대로
+export const PIECE_SETS: Record<string, Theme> = { marble: MARBLE, classic: CLASSIC };
+export function withPieceSet(theme: Theme, setId: string): Theme {
+  if (!theme.pieceSets) return theme;
+  const src = PIECE_SETS[theme.pieceSets.includes(setId) ? setId : theme.pieceSets[0]];
+  return {
+    ...theme,
+    modelMaterials: src.modelMaterials,
+    whitePiece: src.whitePiece, blackPiece: src.blackPiece,
+    lightSquare: src.lightSquare, darkSquare: src.darkSquare, frame: src.frame,
+    boardFinish: src.boardFinish, pieceCarving: src.pieceCarving,
+  };
+}
 
