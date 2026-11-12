@@ -6,7 +6,7 @@ import { fileURLToPath } from 'url';
 
 const dir = path.dirname(fileURLToPath(import.meta.url));
 const url = process.argv[2] || 'http://localhost:4173/chess_beep-ai/';
-const files = ['play-2d.mjs', 'view-3d.mjs', 'replay-3d.mjs'];
+const files = ['play-2d.mjs', 'view-3d.mjs', 'replay-3d.mjs', 'online-2p.mjs']; // online-2p는 인터넷 필요
 const bad = [];
 for (const f of files) {
   console.log(`\n── ${f} ──`);

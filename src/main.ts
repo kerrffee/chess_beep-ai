@@ -8,6 +8,7 @@ import { reloadForNewVersion, isMissingChunk } from './reload';
 import { findPersonality } from './personality';
 import { squareName } from './notation';
 import * as G from './game'; // 게임 진행 담당 (판 상태, 수 두기, AI, 대사 …)
+import * as O from './online'; // 친구와 온라인 1대1 (연결)
 
 import { SYMBOLS, drawBoard, drawMoveList, makeButton, makeSelect, scrollMoves } from './view';
 import { downloadText, parsePGN, pgnFilename, sansOf } from './pgn';
@@ -203,12 +204,21 @@ function render() {
 // 대국 화면 (사람 vs AI, 사람끼리, AI 대결 구경)
 function renderPlay(app: HTMLElement) {
   const watching = G.opponent === 'watch';
+  const online = G.opponent === 'online';
 
   // ① 고르기 상자들: 상대 / (내 색 또는 백·흑 AI) / 생각 시간
   const controls = document.createElement('div');
   controls.className = 'controls';
-  controls.appendChild(makeSelect('opponent', G.OPPONENTS, G.opponent, G.setOpponent));
-  if (watching) {
+  controls.appendChild(makeSelect('opponent', G.OPPONENTS, G.opponent, chooseOpponent));
+  if (online) {
+    // 온라인: 색은 방을 만들 때만 고름 (친구는 반대 색, 다시 하기마다 바뀜)
+    if (O.status === 'idle' || O.status === 'error') {
+      controls.appendChild(makeSelect('opponent', [
+        { value: 'w' as Color, label: '방 만들면 나: 백' },
+        { value: 'b' as Color, label: '방 만들면 나: 흑' },
+      ], hostColorChoice, v => { hostColorChoice = v; }));
+    }
+  } else if (watching) {
     controls.appendChild(makeSelect('opponent', G.AI_LIST.map(o => ({ ...o, label: '백: ' + o.label })),
       G.watchAI.w, v => G.setWatchAI('w', v)));
     controls.appendChild(makeSelect('opponent', G.AI_LIST.map(o => ({ ...o, label: '흑: ' + o.label })),
@@ -230,12 +240,16 @@ function renderPlay(app: HTMLElement) {
   const personaInfo = document.createElement('div');
   personaInfo.className = 'persona-info';
   personaInfo.textContent = G.opponent === 'human' ? '한 화면에서 둘이 번갈아 둠'
+    : online ? '방을 만들어 링크를 보내면, 친구가 자기 컴퓨터·휴대폰에서 들어와 1대1로 둠'
     : watching ? `${findPersonality(G.watchAI.w).name}(백) vs ${findPersonality(G.watchAI.b).name}(흑)`
     : findPersonality(G.opponent).description;
 
   const info = document.createElement('div');
   info.className = 'info';
-  info.textContent = G.statusText();
+  info.textContent = online && !O.canPlay() ? '온라인 대국' : G.statusText();
+  // 휴대폰: 친구와 막 연결되면 설정 판(아래 시트)을 접어서 판이 보이게
+  if (online && O.status === 'connected' && seenOnline !== 'connected' && window.innerWidth <= 760) panelOpen = false;
+  seenOnline = online ? O.status : 'idle';
 
   // 생각하는 AI가 지난 수에서 몇 수 앞까지 봤는지 (구경할 때는 해설)
   const depthInfo = document.createElement('div');
@@ -246,7 +260,7 @@ function renderPlay(app: HTMLElement) {
 
   // AI의 말풍선 (사람끼리 둘 때는 없음). 비어 있어도 자리를 지켜서 판이 들썩이지 않게
   let bubble: HTMLElement | null = null;
-  if (G.opponent !== 'human') {
+  if (G.opponent !== 'human' && !online) {
     bubble = document.createElement('div');
     bubble.className = 'speech' + (G.speech ? '' : ' empty');
     const who = document.createElement('span');
@@ -265,7 +279,7 @@ function renderPlay(app: HTMLElement) {
     // 판 건너편 상대: 사람 vs AI일 때만 (AI 쪽 색 = 내 반대 색)
     const aiColor: Color = G.playerColor === 'w' ? 'b' : 'w';
     const mate = gameStatus(G.game, G.history) === 'checkmate';
-    const opponent = watching || G.opponent === 'human' ? null : {
+    const opponent = watching || G.opponent === 'human' || online ? null : {
       id: G.opponent, color: aiColor,
       lost: (mate && G.game.turn === aiColor) || G.resigned === aiColor,
     };
@@ -300,8 +314,16 @@ function renderPlay(app: HTMLElement) {
   if (watching) {
     buttons.appendChild(makeButton(G.paused ? '계속' : '일시 정지', G.togglePause));
   }
-  buttons.appendChild(makeButton('무르기', G.undo, G.snapshots.length === 0 && !G.resigned));
-  buttons.appendChild(makeButton('다시 시작', G.restart));
+  if (online) {
+    // 온라인: 무르기 없음. 새 판은 둘 다 "다시 하기"를 눌러야 (색을 바꿔서)
+    const over = G.resigned !== null || gameStatus(G.game, G.history) !== 'playing';
+    buttons.appendChild(makeButton('기권', () => { if (confirmResign()) O.resign(); }, !O.canPlay() || over));
+    const label = O.myRematch ? '다시 하기 (친구 기다리는 중)' : O.peerRematch ? '다시 하기 ← 친구가 원해요' : '다시 하기';
+    buttons.appendChild(makeButton(label, O.requestRematch, !O.canPlay() || O.myRematch));
+  } else {
+    buttons.appendChild(makeButton('무르기', G.undo, G.snapshots.length === 0 && !G.resigned));
+    buttons.appendChild(makeButton('다시 시작', G.restart));
+  }
   buttons.appendChild(makeButton('기보 저장', downloadPGN, G.moveTexts.length === 0));
   buttons.appendChild(makeButton('기보 보기로 열기', openCurrentInReplay, G.moveTexts.length === 0));
 
@@ -357,6 +379,7 @@ function renderPlay(app: HTMLElement) {
     const hud = document.createElement('div');
     hud.className = 'hud';
     hud.append(info, depthInfo);
+    if (online) hud.appendChild(onlineLine());
     if (bubble) hud.appendChild(bubble);
     app.appendChild(hud);
 
@@ -365,14 +388,18 @@ function renderPlay(app: HTMLElement) {
     if (panelOpen) {
       const panel = document.createElement('div');
       panel.className = 'panel';
-      panel.append(controls, personaInfo, buttons, viewRow);
+      panel.append(controls, personaInfo);
+      if (online) panel.appendChild(onlineBox());
+      panel.append(buttons, viewRow);
       if (err) panel.appendChild(err);
       panel.appendChild(side);
       app.appendChild(panel);
     }
   } else {
     // ── 2D: 예전처럼 위에서 아래로 ──
-    app.append(controls, personaInfo, info, depthInfo);
+    app.append(controls, personaInfo);
+    if (online) app.appendChild(onlineBox());
+    app.append(info, depthInfo);
     if (bubble) app.appendChild(bubble);
     const middle = document.createElement('div');
     middle.className = 'middle';
@@ -387,6 +414,119 @@ function renderPlay(app: HTMLElement) {
   soundForNewMoves();
 
   G.maybeAIMove();
+}
+
+// ---------- 친구와 온라인: 화면 ----------
+let hostColorChoice: Color = 'w';
+let seenOnline: O.OnlineStatus = 'idle'; // 지난번 그릴 때의 연결 상태 (막 연결됐는지 알려고)
+let typedCode = '';     // "코드로 들어가기" 칸에 친 글자 (화면을 다시 그려도 남게)
+let copied = false;     // "링크 복사" 누른 직후 표시
+
+// 상대 고르기: 온라인을 고르면 설정 판을 펼쳐서 방 만들기·들어가기가 보이게
+function chooseOpponent(v: string) {
+  if (v === 'online') panelOpen = true;
+  G.setOpponent(v);
+}
+
+// 기권은 되돌릴 수 없어서 한 번 묻기 (브라우저 확인 창 대신 버튼을 한 번 더 누르게)
+let resignArmed = 0;
+function confirmResign(): boolean {
+  if (Date.now() - resignArmed < 3000) { resignArmed = 0; return true; }
+  resignArmed = Date.now();
+  render();
+  setTimeout(render, 3000);
+  return false;
+}
+
+// 3D 화면 왼쪽 위에 짧게: 연결 상태
+function onlineLine(): HTMLElement {
+  const el = document.createElement('div');
+  el.className = 'depth-info';
+  el.textContent = {
+    idle: '⚙ 설정에서 방을 만들거나 코드로 들어가세요',
+    creating: '방 만드는 중…',
+    waiting: `방 코드 ${O.code} — 친구를 기다리는 중`,
+    joining: '친구 방에 들어가는 중…',
+    connected: `친구와 연결됨 · 나: ${G.colorName(G.playerColor)}` + (O.peerRematch ? ' · 친구가 다시 하기를 원해요' : ''),
+    lost: '친구와 연결이 끊겼어요',
+    error: O.errorText,
+  }[O.status];
+  if (resignArmed) el.textContent = '기권하려면 3초 안에 기권을 한 번 더 누르세요';
+  return el;
+}
+
+// 설정 판(2D면 위쪽) 안: 방 만들기 / 코드 / 링크 / 들어가기
+function onlineBox(): HTMLElement {
+  const box = document.createElement('div');
+  box.className = 'online-box';
+  const line = (text: string, cls = '') => {
+    const d = document.createElement('div');
+    if (cls) d.className = cls;
+    d.textContent = text;
+    box.appendChild(d);
+    return d;
+  };
+  const row = (...els: HTMLElement[]) => {
+    const d = document.createElement('div');
+    d.className = 'online-row';
+    d.append(...els);
+    box.appendChild(d);
+  };
+  const linkRow = () => {
+    line(`방 코드: ${O.code}`, 'online-code');
+    const link = document.createElement('input');
+    link.className = 'online-input';
+    link.readOnly = true;
+    link.value = O.inviteLink();
+    link.addEventListener('focus', () => link.select());
+    row(link);
+    row(makeButton(copied ? '복사했어요 ✓' : '링크 복사', () => copyLink(link)));
+  };
+
+  if (O.status === 'idle' || O.status === 'error') {
+    if (O.status === 'error') line(O.errorText, 'online-error');
+    row(makeButton('방 만들기', () => O.host(hostColorChoice)));
+    const input = document.createElement('input');
+    input.className = 'online-input';
+    input.placeholder = '친구 방 코드 6글자';
+    input.value = typedCode;
+    input.maxLength = 8;
+    input.addEventListener('input', () => { typedCode = O.cleanCode(input.value); });
+    input.addEventListener('keydown', e => { if (e.key === 'Enter') O.join(typedCode); });
+    row(input, makeButton('들어가기', () => O.join(typedCode)));
+  } else if (O.status === 'creating') {
+    line('방 만드는 중…');
+    row(makeButton('취소', O.leaveAndRefresh));
+  } else if (O.status === 'waiting') {
+    linkRow();
+    line('이 링크를 친구에게 보내세요. 친구가 열면 바로 시작해요. (이 창을 닫거나 새로고침하면 방이 없어져요)', 'online-hint');
+    row(makeButton('방 닫기', O.leaveAndRefresh));
+  } else if (O.status === 'joining') {
+    line(`방 ${O.code}에 들어가는 중…`);
+    row(makeButton('취소', O.leaveAndRefresh));
+  } else if (O.status === 'connected') {
+    line(`친구와 연결됨 · 나: ${G.colorName(G.playerColor)}`, 'online-ok');
+    if (O.peerRematch) line('친구가 다시 하기를 원해요 (누르면 색을 바꿔 새 판)', 'online-hint');
+    row(makeButton('나가기', O.leaveAndRefresh));
+  } else if (O.status === 'lost') {
+    if (O.role === 'host') {
+      line('친구와 연결이 끊겼어요. 친구가 같은 링크를 다시 열면 이어서 둬요.', 'online-error');
+      linkRow();
+    } else {
+      line('친구와 연결이 끊겼어요.', 'online-error');
+      row(makeButton('다시 들어가기', O.rejoin));
+    }
+    row(makeButton('나가기', O.leaveAndRefresh));
+  }
+  return box;
+}
+
+async function copyLink(input: HTMLInputElement) {
+  try { await navigator.clipboard.writeText(input.value); }
+  catch { input.select(); document.execCommand('copy'); } // 클립보드 권한이 없을 때
+  copied = true;
+  render();
+  setTimeout(() => { copied = false; render(); }, 2000);
 }
 
 // 형세 그래프: 가운데 선 위 = 백 유리, 아래 = 흑 유리. ±8폰(800점)에서 잘림
@@ -470,6 +610,13 @@ let wasWide = window.innerWidth > 760;
 window.addEventListener('resize', () => { const wide = window.innerWidth > 760; if (wide !== wasWide) { wasWide = wide; render(); } });
 // 테스트용: 3D 판을 몇 번 그렸는지 (가만히 있을 때 안 늘어나는지 확인)
 Object.assign(window, { __chess3dRenders: () => board3D?.renderCount() ?? 0 });
+// 초대 링크(…/?room=코드)로 들어왔으면 바로 친구 방에 들어감
+const roomFromLink = new URLSearchParams(location.search).get('room');
+if (roomFromLink) {
+  panelOpen = true;
+  G.setOpponent('online');
+  O.join(roomFromLink);
+}
 render();
 
 // ---------- characters.jsonc 안내 ----------

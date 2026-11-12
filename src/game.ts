@@ -17,11 +17,12 @@ function notify() { listener(); }
 
 export const PIECE_NAMES: Record<PieceType, string> = { p: '폰', n: '나이트', b: '비숍', r: '룩', q: '퀸', k: '킹' };
 
-// 상대 고르기: 성격 있는 AI (personality.ts의 id), 사람(둘이서), AI끼리 구경
-type Opponent = string | 'human' | 'watch';
+// 상대 고르기: 성격 있는 AI (personality.ts의 id), 사람(둘이서), 친구와 온라인, AI끼리 구경
+type Opponent = string | 'human' | 'online' | 'watch';
 export const OPPONENTS: { value: Opponent; label: string }[] = [
   ...PERSONALITIES.map(p => ({ value: p.id, label: p.name })),
   { value: 'human', label: '사람 (둘이서)' },
+  { value: 'online', label: '친구와 온라인 (1대1)' },
   { value: 'watch', label: 'AI 대결 구경' },
 ];
 export const AI_LIST = PERSONALITIES.map(p => ({ value: p.id, label: p.name }));
@@ -37,11 +38,12 @@ export const WATCH_DELAY = 900;
 
 // 테스트용: 주소 뒤에 ?fen=... 을 붙이면 그 배치로 시작
 export const startFEN = new URLSearchParams(location.search).get('fen');
+// (온라인 대국은 친구 화면과 같아야 해서 항상 처음 배치로)
 export function newGame(): GameState {
-  return startFEN ? fromFEN(startFEN) : initialGame();
+  return startFEN && opponent !== 'online' ? fromFEN(startFEN) : initialGame();
 }
 
-export const game: GameState = newGame();
+export const game: GameState = startFEN ? fromFEN(startFEN) : initialGame();
 export let selected: number | null = null;
 export let targets: number[] = [];
 // 프로모션 고르는 중이면 그 수의 출발·도착 칸
@@ -68,7 +70,7 @@ export let commentary = '';              // 구경할 때 해설 한 줄
 
 // 그 색을 AI가 두면 성격 id, 사람이 두면 null
 export function aiFor(color: Color): string | null {
-  if (opponent === 'human') return null;
+  if (opponent === 'human' || opponent === 'online') return null;
   if (opponent === 'watch') return watchAI[color];
   return color === playerColor ? null : opponent;
 }
@@ -215,6 +217,14 @@ export function play(move: Move, whiteScore: number | null = null): string {
 }
 
 export function restart() {
+  if (opponent === 'online') return; // 온라인은 "다시 하기"(둘 다 눌러야 함)로만 새 판
+  resetBoard();
+  greet();
+  notify();
+}
+
+// 판·기보·대사를 처음으로 (알리기·인사는 부르는 쪽이)
+function resetBoard() {
   stopAI();
   Object.assign(game, newGame()); // 게임 상태를 처음으로 덮어쓰기
   firstTurn = game.turn;
@@ -229,10 +239,8 @@ export function restart() {
   aiBook = false;
   paused = false;
   resetSpeech();
-  greet();
   pendingPromotion = null;
   select(null);
-  notify();
 }
 
 export function resetSpeech() {
@@ -246,6 +254,7 @@ export function resetSpeech() {
 // AI와 둘 때: AI 수 + 내 수를 함께 되돌려서 다시 내 차례로 (AI가 생각 중이면 내 수 하나만)
 // 사람끼리: 한 수만. 구경할 때: 일시 정지하고 한 수만
 export function undo() {
+  if (opponent === 'online') return; // 온라인은 무르기 없음
   if (snapshots.length === 0 && !resigned) return;
   stopAI();
   let plies = 1;
@@ -337,7 +346,7 @@ export function onAIReply(id: number, move: Move, depth: number, score: number, 
 export function statusText(): string {
   if (resigned) {
     const id = aiFor(resigned);
-    const who = id ? findPersonality(id).name : '나';
+    const who = id ? findPersonality(id).name : opponent === 'online' && resigned !== playerColor ? '친구' : '나';
     return `${who} 기권! ${colorName(otherColor(resigned))} 승리`;
   }
   const status = gameStatus(game, history);
@@ -350,6 +359,7 @@ export function statusText(): string {
   if (status === 'repetition') return '같은 장면 3회 반복 — 무승부';
   if (status === 'material') return '메이트할 기물 부족 — 무승부';
   const check = inCheck(game, game.turn) ? ' — 체크!' : '';
+  if (opponent === 'online') return `${game.turn === playerColor ? '내' : '친구'} 차례 (${side})${check}`;
   if (opponent === 'watch' && paused) return `${side} 차례${check} (일시 정지)`;
   const thinking = isAITurn() ? ' (AI 생각 중…)' : '';
   return `${side} 차례${check}${thinking}`;
@@ -370,6 +380,7 @@ export function onSquareClick(index: number) {
   if (gameStatus(game, history) !== 'playing' || resigned) return; // 게임이 끝났으면 클릭 무시
   if (pendingPromotion) return;                        // 고르는 중이면 판 클릭 무시
   if (aiFor(game.turn) !== null) return;               // AI 차례면 클릭 무시 (구경할 때는 항상)
+  if (opponent === 'online' && (game.turn !== playerColor || !onlineHooks.canPlay())) return; // 친구 차례·연결 전
 
   const piece = game.board[index];
 
@@ -388,6 +399,7 @@ export function onSquareClick(index: number) {
       play(m);
       reactToHuman(captured);
       select(null);
+      if (opponent === 'online') onlineHooks.sendMoves(moveUcis);
     }
   } else {
     select(null);
@@ -399,7 +411,12 @@ export function onSquareClick(index: number) {
 
 // ---------- 화면에서 부르는 설정 바꾸기 ----------
 // 상대·색·구경 AI를 바꾸면 새 게임, 생각 시간·일시 정지는 게임이 이어짐
-export function setOpponent(v: Opponent) { opponent = v; restart(); }
+export function setOpponent(v: Opponent) {
+  const wasOnline = opponent === 'online';
+  opponent = v;
+  if (wasOnline && v !== 'online') onlineHooks.leave();
+  if (v === 'online') { resetBoard(); notify(); } else restart();
+}
 export function setPlayerColor(v: Color) { playerColor = v; restart(); }
 export function setWatchAI(color: Color, id: string) { watchAI = { ...watchAI, [color]: id }; restart(); }
 export function setThinkTime(ms: number) { thinkTime = ms; notify(); }
@@ -414,6 +431,7 @@ export function choosePromotion(type: PieceType) {
   reactToHuman(captured);
   pendingPromotion = null;
   select(null);
+  if (opponent === 'online') onlineHooks.sendMoves(moveUcis);
   notify();
 }
 export function cancelPromotion() {
@@ -428,8 +446,45 @@ export function pgnText(): string {
   if (resigned) result = resigned === 'w' ? '0-1' : '1-0';
   else if (status === 'checkmate') result = game.turn === 'w' ? '0-1' : '1-0';
   else if (status !== 'playing') result = '1/2-1/2';
-  const nameOf = (c: Color) => { const id = aiFor(c); return id ? findPersonality(id).name : '사람'; };
+  const nameOf = (c: Color) => {
+    const id = aiFor(c);
+    if (id) return findPersonality(id).name;
+    if (opponent === 'online') return c === playerColor ? '나' : '친구';
+    return '사람';
+  };
   return buildPGN({ white: nameOf('w'), black: nameOf('b'), result, sans: moveTexts, firstTurn, fen: startFEN ?? undefined });
 }
 
 greet(); // 처음 상대(대가)의 인사
+
+// ---------- 친구와 온라인 (연결은 online.ts가 맡고, 여기는 판만) ----------
+// online.ts가 자기 함수를 넣어 줌 (game.ts가 online.ts를 직접 부르면 서로 불러서 꼬여서)
+export const onlineHooks = {
+  sendMoves: (_ucis: string[]) => {},
+  canPlay: () => false,
+  leave: () => {},
+};
+export function onlineChanged() { notify(); }
+
+// 새 온라인 판: 처음 배치, 내 색 정하기
+export function startOnlineGame(color: Color) {
+  opponent = 'online';
+  playerColor = color;
+  resetBoard();
+}
+
+// 친구가 보낸 "지금까지의 수 전체"에 판을 맞춤
+// 보통은 끝에 한 수만 늘어나니 그것만 두고, 어긋났으면 처음부터 다시 둠
+export function applyRemoteMoves(ucis: string[]) {
+  const same = moveUcis.length <= ucis.length && moveUcis.every((u, i) => u === ucis[i]);
+  if (!same) { const keep = resigned; resetBoard(); resigned = keep; }
+  for (let i = moveUcis.length; i < ucis.length; i++) {
+    const m = legalMoves(game).find(x => squareName(x.from) + squareName(x.to) + (x.promotion ?? '') === ucis[i]);
+    if (!m) { console.warn('친구가 보낸 수가 이 판에서 둘 수 없는 수예요:', ucis[i]); break; }
+    play(m);
+  }
+  if (selected !== null) select(selected); // 고르고 있던 기물의 갈 곳을 새 판 기준으로
+  pendingPromotion = null;
+}
+
+export function setOnlineResigned(color: Color) { resigned = color; }
