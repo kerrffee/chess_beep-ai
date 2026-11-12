@@ -12,6 +12,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 import type { Opponent } from './opponent';
+import { modelUrl } from './modelUrl';
 
 const HEIGHT = 10.5;      // 모자 끝까지 키 (칸) ≈ 60cm
 const HOME_Z = -10.5;     // 떠 있는 자리 (판 가운데에서)
@@ -24,7 +25,7 @@ const ANGRY_COLOR = new THREE.Color(0xff4a4a);
 let cache: Promise<THREE.Group | null> | null = null;
 function loadModel(): Promise<THREE.Group | null> {
   if (!cache) {
-    const url = import.meta.env.BASE_URL + 'models/character/chaos.glb';
+    const url = modelUrl('character/chaos.glb');
     cache = new GLTFLoader().loadAsync(url).then(g => g.scene, err => {
       console.warn('혼돈 모델을 못 불러옴', err);
       return null;

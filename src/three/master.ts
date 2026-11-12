@@ -13,6 +13,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import type { Opponent } from './opponent';
 import { DESK } from './room';
+import { modelUrl } from './modelUrl';
 
 const HEIGHT = 26;        // 키 (칸) ≈ 150cm. 더 크면 '앉아서' 시점에서 머리가 화면 위로 잘림
 const STAND_Z = -13;      // 서 있는 자리 (판 가운데에서)
@@ -23,7 +24,7 @@ const ORB_COLOR = 0xa8d8ff;
 let cache: Promise<THREE.Group | null> | null = null;
 function loadModel(): Promise<THREE.Group | null> {
   if (!cache) {
-    const url = import.meta.env.BASE_URL + 'models/character/master.glb';
+    const url = modelUrl('character/master.glb');
     cache = new GLTFLoader().loadAsync(url).then(g => g.scene, err => {
       console.warn('대가 모델을 못 불러옴', err);
       return null;

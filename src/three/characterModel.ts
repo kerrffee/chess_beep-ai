@@ -17,6 +17,7 @@
 // 그다음 크기를 칸 단위(1칸 = 5.8cm)로 바꾸고, 발바닥이 y=0, 얼굴이 +z를 보게 둠
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { modelUrl } from './modelUrl';
 
 const CM = 1 / 5.8; // 모델 단위(cm) → 칸
 
@@ -33,7 +34,7 @@ const cache = new Map<string, Promise<THREE.Group | null>>();
 function loadScene(file: string): Promise<THREE.Group | null> {
   let p = cache.get(file);
   if (!p) {
-    const url = import.meta.env.BASE_URL + 'models/character/' + file;
+    const url = modelUrl('character/' + file);
     p = new GLTFLoader().loadAsync(url).then(g => g.scene, err => {
       console.warn('캐릭터 모델을 못 불러옴: ' + file, err);
       return null;

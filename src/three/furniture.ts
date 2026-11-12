@@ -3,6 +3,7 @@
 // 출처: 대리석 탁자 = Poly Haven (CC0)
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { modelUrl } from './modelUrl';
 
 // 크기 기준: 모델은 실제 크기(m), 방은 체스판 한 칸 = 1 (= 5.8cm)
 export const M = 1 / 0.058;
@@ -12,7 +13,7 @@ const cache = new Map<string, Promise<THREE.Object3D | null>>();
 function load(path: string): Promise<THREE.Object3D | null> {
   let p = cache.get(path);
   if (!p) {
-    const url = import.meta.env.BASE_URL + 'models/room/' + path;
+    const url = modelUrl('room/' + path);
     p = new GLTFLoader().loadAsync(url).then(g => g.scene, err => {
       console.warn('가구 모델을 못 불러옴: ' + path, err);
       return null;

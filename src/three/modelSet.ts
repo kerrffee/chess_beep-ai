@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import type { PieceKind } from './pieces';
+import { modelUrl } from './modelUrl';
 
 // Poly Haven "Chess Set" (CC0) 모델에서 기물과 판을 꺼내 쓰는 파일
 // 모델은 실제 크기(칸 한 변 = 0.058m)라서, 칸 한 변 = 1이 되게 키움
@@ -37,7 +38,7 @@ function withShadows(obj: THREE.Object3D) {
 
 // 모델 파일 불러오기. 실패하면 null (그때는 코드로 만든 기물을 씀)
 export async function loadModelSet(): Promise<ModelSet | null> {
-  const url = import.meta.env.BASE_URL + 'models/chess_set/chess_set_1k.gltf';
+  const url = modelUrl('chess_set/chess_set_1k.gltf');
   let root: THREE.Object3D;
   try {
     const gltf = await new GLTFLoader().loadAsync(url);
