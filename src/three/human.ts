@@ -53,6 +53,9 @@ interface Style {
   // 처음(서 있는) 자세에서 왼손 손바닥이 향하는 쪽 (캐릭터 기준, 오른손은 좌우 거울). 있으면 기물을 집을 때
   // 아래팔을 돌려 손바닥이 아래를 보게 하고 손목을 손바닥 쪽으로 굽힘. 없으면 손끝 방향만 맞춤
   palm?: [number, number, number];
+  // 팔에 매달린 넝마 자락 지우기: 그 팔 무게가 절반 넘는데 팔 뼈에서 r(m)보다 먼 점이 있는 삼각형을 지움
+  // (팔을 들면 자락이 통째로 들려 판처럼 보여서. 랜덤 왼팔 — 2026-11-12)
+  cutFlap?: { side: 'l' | 'r'; r: number };
 }
 const STYLES: Record<Who, Style> = {
   // 겁쟁이(2): 욕심쟁이(2)와 같은 방식. 오른손 갈고리가 6칸쯤 길어서 손목을 높이 두고 갈고리 끝으로 기물을 걸어 끎
@@ -72,7 +75,7 @@ const STYLES: Record<Who, Style> = {
     } }, reachIn: 560, reachOut: 420, rimColor: 0xc8d2ff, grip: [0, 2.6, -2.4] },
   // 돌격대장, 랜덤, 퀸 사랑꾼: 욕심쟁이(2)와 같은 방식 (tools/rig-character.py)
   attacker: { file: 'attacker.glb', rig: { strip: null, unit: 100 }, reachIn: 300, reachOut: 300, rimColor: 0xb8e0a0 },
-  random: { file: 'random.glb', rig: { strip: null, unit: 100 }, reachIn: 700, reachOut: 450, rimColor: 0xd8c8f0, grip: [0, 2.6, -1.1] },
+  random: { file: 'random.glb', rig: { strip: null, unit: 100 }, reachIn: 700, reachOut: 450, rimColor: 0xd8c8f0, grip: [0, 2.6, -1.1], cutFlap: { side: 'l', r: 0.08 } },
   queenlover: { file: 'queenlover.glb', rig: { strip: null, unit: 100 }, reachIn: 900, reachOut: 600, rimColor: 0xffd8f0, palm: [0, 0, 1] },
 };
 
@@ -111,6 +114,34 @@ function rollForearm(r: Rig, lower: THREE.Bone, hand: THREE.Bone, palmLocal: THR
   turn(r, lower, axis, Math.atan2(new THREE.Vector3().crossVectors(a, b).dot(axis), a.dot(b)) * k);
 }
 
+// 팔에 매달린 자락 지우기 (Style.cutFlap). 처음(서 있는) 자세 기준으로 재므로 같은 모델에 여러 번 해도 결과가 같음
+function cutFlap(m: THREE.SkinnedMesh, side: 'l' | 'r', R: number) {
+  const g = m.geometry, P = g.attributes.position, J = g.attributes.skinIndex, W = g.attributes.skinWeight, idx = g.index;
+  if (!idx) return;
+  const bones = m.skeleton.bones, inv = m.skeleton.boneInverses;
+  const at = (n: string) => { const i = bones.findIndex(b => b.name === n); return i < 0 ? null : new THREE.Vector3().setFromMatrixPosition(inv[i].clone().invert()); };
+  const arm = new Set(['upperarm', 'lowerarm', 'hand', 'middle_01'].map(n => bones.findIndex(b => b.name === `${n}_${side}`)));
+  const chain = ['clavicle', 'upperarm', 'lowerarm', 'hand', 'middle_01'].map(n => at(`${n}_${side}`)).filter((v): v is THREE.Vector3 => !!v);
+  const segs = chain.slice(1).map((v, i) => new THREE.Line3(chain[i], v));
+  const v = new THREE.Vector3(), cp = new THREE.Vector3();
+  const far = new Uint8Array(P.count);
+  for (let i = 0; i < P.count; i++) {
+    let aw = 0;
+    for (let k = 0; k < 4; k++) if (arm.has(J.getComponent(i, k))) aw += W.getComponent(i, k);
+    if (aw < 0.5) continue;
+    v.fromBufferAttribute(P, i);
+    let d = Infinity;
+    for (const sg of segs) { sg.closestPointToPoint(v, true, cp); d = Math.min(d, cp.distanceTo(v)); }
+    if (d > R) far[i] = 1;
+  }
+  const keep: number[] = [];
+  for (let t = 0; t < idx.count; t += 3) {
+    const a = idx.getX(t), b = idx.getX(t + 1), c = idx.getX(t + 2);
+    if (!far[a] && !far[b] && !far[c]) keep.push(a, b, c);
+  }
+  if (keep.length < idx.count) g.setIndex(keep);
+}
+
 export function createHuman(who: Who, deskTop: number): Opponent {
   const style = STYLES[who];
   const group = new THREE.Group();
@@ -142,6 +173,7 @@ export function createHuman(who: Who, deskTop: number): Opponent {
     if (!r || disposed) return;
     rig = r;
     group.add(r.root);
+    if (style.cutFlap) for (const m of r.meshes) cutFlap(m, style.cutFlap.side, style.cutFlap.r);
     // 손가락 뼈가 없는 모델(허세꾼): 손 끝 방향을 잴 '손끝' 가상 뼈를 손에 붙임 (처음 자세에서 아래팔 → 손 방향으로 2칸)
     r.root.updateMatrixWorld(true);
     for (const s of ['l', 'r'] as const) {
