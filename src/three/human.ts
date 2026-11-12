@@ -24,7 +24,7 @@
 //         수를 둘 때 손이 빠르고 기물을 앞으로 확 밀어붙임 (살짝 지나쳤다 돌아옴)
 //         기물을 잡으면 몸을 세우고 오른 주먹을 번쩍 ("돌파!"), 자기 기물을 잡히면 주먹을 판 쪽으로 쭉 내지름 ("계속 전진!")
 //         체크당하면 방패를 얼굴 앞까지 들어 막음, 지면 방패를 책상에 내려놓고 고개를 숙인 채 주먹으로 책상을 쿵쿵
-// 랜덤: 두건 쓴 방랑자 (들고 있던 깃대는 뺌). 2.3초마다 아무 자세나 새로 고름
+// 랜덤: 케이블 달린 로봇 (랜덤2 모델, 2026-11-12에 두건 쓴 방랑자에서 바꿈). 2.3초마다 아무 자세나 새로 고름
 //         (책상에 손 / 머리 긁기 / 턱 괴기 / 손가락으로 책상 두드리기 / 손 흔들기) + 고개도 아무 데나 갸웃
 //         수를 둘 때 손이 갈지자로 비틀비틀 감. 잡든 잡히든 체크든 별 관심 없음:
 //         잡으면 박수, 잡히면 어깨 으쓱, 지면 의자에 기대 천장을 보며 계속 으쓱
@@ -54,7 +54,7 @@ interface Style {
   // 아래팔을 돌려 손바닥이 아래를 보게 하고 손목을 손바닥 쪽으로 굽힘. 없으면 손끝 방향만 맞춤
   palm?: [number, number, number];
   // 팔에 매달린 넝마 자락 지우기: 그 팔 무게가 절반 넘는데 팔 뼈에서 r(m)보다 먼 점이 있는 삼각형을 지움
-  // (팔을 들면 자락이 통째로 들려 판처럼 보여서. 랜덤 왼팔 — 2026-11-12)
+  // (팔을 들면 자락이 통째로 들려 판처럼 보여서. 예전 랜덤 왼팔에 썼음 — 2026-11-12, 지금은 쓰는 캐릭터 없음)
   cutFlap?: { side: 'l' | 'r'; r: number };
 }
 const STYLES: Record<Who, Style> = {
@@ -75,7 +75,7 @@ const STYLES: Record<Who, Style> = {
     } }, reachIn: 560, reachOut: 420, rimColor: 0xc8d2ff, grip: [0, 2.6, -2.4] },
   // 돌격대장, 랜덤, 퀸 사랑꾼: 욕심쟁이(2)와 같은 방식 (tools/rig-character.py)
   attacker: { file: 'attacker.glb', rig: { strip: null, unit: 100 }, reachIn: 300, reachOut: 300, rimColor: 0xb8e0a0 },
-  random: { file: 'random.glb', rig: { strip: null, unit: 100 }, reachIn: 700, reachOut: 450, rimColor: 0xd8c8f0, grip: [0, 2.6, -1.1], cutFlap: { side: 'l', r: 0.08 } },
+  random: { file: 'random.glb', rig: { strip: null, unit: 100 }, reachIn: 700, reachOut: 450, rimColor: 0xd8c8f0, grip: [0, 2.6, -1.1] },
   queenlover: { file: 'queenlover.glb', rig: { strip: null, unit: 100 }, reachIn: 900, reachOut: 600, rimColor: 0xffd8f0, palm: [0, 0, 1] },
 };
 

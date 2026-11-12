@@ -1,5 +1,5 @@
-# 뼈대 없는 사람 모델(.glb)에 뼈대를 만들어 붙이고 가볍게 줄여서 내보냄 (욕심쟁이2, 핑계왕, 겁쟁이2, 돌격대장, 랜덤, 퀸 사랑꾼에 씀)
-# 사용: pip install bpy  →  python3 tools/rig-character.py -- <원본.glb> <결과.glb> <greedy2|excuser|coward2|attacker|random|queenlover>
+# 뼈대 없는 사람 모델(.glb)에 뼈대를 만들어 붙이고 가볍게 줄여서 내보냄 (욕심쟁이2, 핑계왕, 겁쟁이2, 돌격대장, 랜덤(2), 퀸 사랑꾼에 씀)
+# 사용: pip install bpy  →  python3 tools/rig-character.py -- <원본.glb> <결과.glb> <greedy2|excuser|coward2|attacker|random|random2|queenlover>
 # 그다음 그림 줄이기: npx @gltf-transform/cli resize <결과.glb> <최종.glb> --width 1024 --height 1024
 import bpy, bmesh, sys, mathutils
 from mathutils import Vector
@@ -53,6 +53,16 @@ RD = {  # 랜덤 (두건 쓴 방랑자. 오른손에 든 깃대는 지움, 왼�
     'thigh_l': (0.09, -0.2, 0.06), 'calf_l': (0.11, -0.55, 0.08), 'foot_l': (0.14, -0.85, 0.05), 'ball_l': (0.15, -0.92, 0.16), 'ball_end_l': (0.15, -0.92, 0.23),
     'thigh_r': (-0.09, -0.2, 0.03), 'calf_r': (-0.15, -0.55, -0.06), 'foot_r': (-0.19, -0.85, -0.13), 'ball_r': (-0.2, -0.92, -0.04), 'ball_end_r': (-0.2, -0.92, 0.01),
 }
+RD2 = {  # 랜덤2 (케이블 달린 로봇. 오른손 검지를 턱에 대고 생각하는 자세, 왼손은 허리에, 몸이 오른쪽으로 살짝 틀어짐) — 2026-11-12
+    'pelvis': (0, -0.05, 0.03), 'spine_01': (0, 0.07, 0.0), 'spine_02': (0, 0.22, -0.01), 'spine_03': (0, 0.37, -0.04),
+    'neck_01': (-0.02, 0.57, -0.06), 'head': (-0.04, 0.65, -0.05), 'head_end': (-0.08, 0.93, 0.0),
+    'clavicle_l': (0.04, 0.53, -0.02), 'upperarm_l': (0.19, 0.54, 0.03), 'lowerarm_l': (0.34, 0.28, 0.06),
+    'hand_l': (0.16, 0.18, 0.04), 'middle_01_l': (0.14, 0.11, 0.02), 'middle_end_l': (0.13, 0.06, 0.0),
+    'clavicle_r': (-0.04, 0.52, -0.07), 'upperarm_r': (-0.2, 0.51, -0.11), 'lowerarm_r': (-0.35, 0.30, -0.05),
+    'hand_r': (-0.21, 0.62, 0.07), 'middle_01_r': (-0.17, 0.66, 0.07), 'middle_end_r': (-0.14, 0.71, 0.06),
+    'thigh_l': (0.08, -0.05, 0.04), 'calf_l': (0.15, -0.40, 0.04), 'foot_l': (0.22, -0.85, 0.0), 'ball_l': (0.24, -0.94, 0.12), 'ball_end_l': (0.25, -0.94, 0.21),
+    'thigh_r': (-0.09, -0.05, 0.0), 'calf_r': (-0.12, -0.40, -0.04), 'foot_r': (-0.10, -0.85, -0.08), 'ball_r': (-0.18, -0.94, 0.02), 'ball_end_r': (-0.22, -0.94, 0.08),
+}
 QL = {  # 퀸 사랑꾼 (후광을 쓴 망토 군주, 두 팔을 앞으로 벌림, 왼발이 앞)
     'pelvis': (0, -0.15, 0.1), 'spine_01': (0, -0.03, 0.1), 'spine_02': (0, 0.12, 0.1), 'spine_03': (0, 0.28, 0.1),
     'neck_01': (0, 0.45, 0.1), 'head': (0, 0.52, 0.1), 'head_end': (0, 0.72, 0.1),
@@ -63,7 +73,7 @@ QL = {  # 퀸 사랑꾼 (후광을 쓴 망토 군주, 두 팔을 앞으로 벌�
     'thigh_l': (0.1, -0.2, 0.1), 'calf_l': (0.17, -0.52, 0.12), 'foot_l': (0.27, -0.85, 0.15), 'ball_l': (0.28, -0.92, 0.26), 'ball_end_l': (0.28, -0.92, 0.34),
     'thigh_r': (-0.1, -0.2, 0.08), 'calf_r': (-0.17, -0.52, 0.04), 'foot_r': (-0.25, -0.85, -0.06), 'ball_r': (-0.26, -0.92, 0.03), 'ball_end_r': (-0.26, -0.92, 0.08),
 }
-J = dict({'greedy2': G2, 'excuser': EX, 'coward2': C2, 'attacker': AT, 'random': RD, 'queenlover': QL}[which])
+J = dict({'greedy2': G2, 'excuser': EX, 'coward2': C2, 'attacker': AT, 'random': RD, 'random2': RD2, 'queenlover': QL}[which])
 # 대칭 모델은 오른쪽을 왼쪽에서 거울로
 for k, v in list(J.items()):
     if k.endswith('_l') and k[:-2] + '_r' not in J:
@@ -263,6 +273,108 @@ if which == 'queenlover':
                 if k > 0: obj.vertex_groups[n].add([v.index], a * k / tot, 'ADD')
             n_arm += 1
     print('팔 무게를 거리로 다시 정한 점:', n_arm)
+# 랜덤2: 손이 몸에 닿아 있고(오른손 → 턱, 왼손 → 허리) 오른팔은 위팔과 아래팔이 거의 겹치게 접혀 있어서
+# 자동 무게가 얼굴·허리를 손에, 아래팔을 위팔에 붙이고, 닿은 곳은 반반 섞여서 팔을 움직이면 판처럼 늘어남 (2026-11-12)
+# → 점마다 "뼈까지 거리 ÷ 그 뼈 굵기"가 가장 작은 뼈를 고름. 팔 뼈가 이기면 팔만(팔 뼈끼리만 섞음), 몸 뼈가 이기면 팔 무게를 뺌
+#   머리 둘레는 머리만
+RD2_R = {'upperarm': 0.075, 'lowerarm': 0.05, 'hand': 0.035, 'middle': 0.02, 'clavicle': 0.08, 'pelvis': 0.15,
+         'spine': 0.15, 'neck': 0.07, 'head': 0.12, 'thigh': 0.1, 'calf': 0.07, 'foot': 0.06, 'ball': 0.05}
+if which == 'random2':
+    gname = {g.index: g.name for g in obj.vertex_groups}
+    def dist(co, ab):
+        t = max(0, min(1, intersect_point_line(co, *ab)[1])); return (co - (ab[0] + (ab[1] - ab[0]) * t)).length
+    ARMP = ('upperarm', 'lowerarm', 'hand', 'middle')
+    isarm = lambda n: n.split('_')[0] in ARMP
+    body = {n: ab for n, ab in segs.items() if not isarm(n) and not n.startswith('clavicle')}
+    n_head = n_arm = 0
+    for v in me.vertices:
+        gs = [(gname[g.group], g.weight) for g in v.groups]
+        for n, _ in gs: obj.vertex_groups[n].remove([v.index])
+        d = {n: dist(v.co, ab) for n, ab in segs.items()}
+        sc = {n: d[n] / RD2_R[n.split('_')[0]] for n in d}
+        win = min(sc, key=sc.get)
+        if not isarm(win) and v.co.z > 0.62 and d['head'] < 0.12:  # 헬멧은 통째로 머리 (경계가 톱니처럼 갈라져서)
+            obj.vertex_groups['head'].add([v.index], 1.0, 'REPLACE'); n_head += 1; continue
+        if isarm(win):
+            side = win[-1]
+            ds = {n: d[n] for n in d if isarm(n) and n.endswith(side)}
+            dmin = min(ds.values())
+            ks = {n: 1 / max(x, 0.005) ** 4 for n, x in ds.items() if x < dmin + 0.03}
+            tot = sum(ks.values())
+            for n, k in ks.items(): obj.vertex_groups[n].add([v.index], k / tot, 'ADD')
+            n_arm += 1
+        else:
+            rest = [(n, w) for n, w in gs if not isarm(n)]
+            rw = sum(w for _, w in rest)
+            if rw < 1e-4: rest = [(min(body, key=lambda n: sc[n]), 1.0)]; rw = 1.0
+            for n, w in rest: obj.vertex_groups[n].add([v.index], w / rw, 'ADD')
+    print('머리로 고정:', n_head, '/ 팔만 따라가는 점:', n_arm)
+    # 메시는 한 덩어리지만 그림(UV) 조각이 부품별로 나뉘어 있음 → 그림 조각 하나를 부품 하나로 봄.
+    # 작은 부품이나 거의 한 뼈만 따르는 부품은 부품 전체가 같은 무게(평균)를 쓰게 함
+    # → 턱에 댄 손가락 끝이 얼굴을 끌고 가거나, 부품이 중간에서 찢어져 늘어나지 않게
+    bm = bmesh.new(); bm.from_mesh(me); bm.faces.ensure_lookup_table()
+    uv = bm.loops.layers.uv.active
+    def same_uv(e):
+        f1, f2 = e.link_faces[0], e.link_faces[1]
+        for v in e.verts:
+            u1 = next(l[uv].uv for l in f1.loops if l.vert == v); u2 = next(l[uv].uv for l in f2.loops if l.vert == v)
+            if (u1 - u2).length > 1e-5: return False
+        return True
+    seen = set(); n_rigid = 0
+    for f0 in bm.faces:
+        if f0.index in seen: continue
+        fs = []; st = [f0]; seen.add(f0.index)
+        while st:
+            f = st.pop(); fs.append(f)
+            for e in f.edges:
+                if len(e.link_faces) != 2: continue
+                g = e.link_faces[0] if e.link_faces[1] == f else e.link_faces[1]
+                if g.index not in seen and same_uv(e): seen.add(g.index); st.append(g)
+        isl = list({v.index for f in fs for v in f.verts})
+        cos = [me.vertices[i].co for i in isl]
+        diag = (Vector((max(c.x for c in cos), max(c.y for c in cos), max(c.z for c in cos))) -
+                Vector((min(c.x for c in cos), min(c.y for c in cos), min(c.z for c in cos)))).length
+        avg = {}; dom = {}
+        for i in isl:
+            gs = me.vertices[i].groups
+            if not gs: continue
+            for g in gs: avg[g.group] = avg.get(g.group, 0) + g.weight / len(isl)
+            d = max(gs, key=lambda g: g.weight).group; dom[d] = dom.get(d, 0) + 1
+        if not dom: continue
+        share = max(dom.values()) / len(isl)
+        kinds = {isarm(gname[g]) for g in dom}  # 팔 부품과 몸 부품이 한 조각에 섞여 있으면(닿은 곳) 그대로 둠
+        if len(kinds) == 1 and (diag < 0.2 or share >= 0.85):
+            top = sorted(avg.items(), key=lambda kv: -kv[1])[:4]; tw = sum(w for _, w in top)
+            for i in isl:
+                for g in list(me.vertices[i].groups): obj.vertex_groups[g.group].remove([i])
+                for gi, w in top: obj.vertex_groups[gi].add([i], w / tw, 'ADD')
+            n_rigid += 1
+    bm.free()
+    print('통째로 같은 무게를 쓰게 한 부품:', n_rigid)
+    # 손·아래팔이 몸(턱·허리·어깨)에 닿은 곳은 메시가 이어져 있어서, 팔을 움직이면 그 사이 삼각형이 길게 늘어남
+    # → 아래팔·손을 주로 따르는 점과 몸을 주로 따르는 점을 함께 가진 삼각형을 지움 (닿은 자리만 조금 뚫림)
+    dom_arm = []
+    for v in me.vertices:
+        g = max(v.groups, key=lambda g: g.weight) if v.groups else None
+        dom_arm.append(None if g is None else gname[g.group].split('_')[0] in ('lowerarm', 'hand', 'middle'))
+    near_body = lambda v: not dom_arm[v.index] and gname[max(v.groups, key=lambda g: g.weight).group].split('_')[0] != 'upperarm'
+    bm = bmesh.new(); bm.from_mesh(me); bm.faces.ensure_lookup_table()
+    cut = [f for f in bm.faces if any(dom_arm[v.index] for v in f.verts) and any(near_body(me.vertices[v.index]) for v in f.verts)]
+    bmesh.ops.delete(bm, geom=cut, context='FACES_ONLY')
+    # 잘리고 남은 작은 부스러기(점 150개 미만)는 지움 (턱·어깨 옆에 둥둥 떠다녀서)
+    bm.verts.ensure_lookup_table(); seen = set(); small = []
+    for v0 in bm.verts:
+        if v0 in seen: continue
+        isl = []; st = [v0]; seen.add(v0)
+        while st:
+            v = st.pop(); isl.append(v)
+            for e in v.link_edges:
+                w = e.other_vert(v)
+                if w not in seen: seen.add(w); st.append(w)
+        if len(isl) < 150: small += isl
+    bmesh.ops.delete(bm, geom=small, context='VERTS')
+    bm.to_mesh(me); bm.free()
+    print('팔과 몸이 닿은 자리에서 지운 삼각형:', len(cut), '/ 작은 부스러기 점:', len(small))
 bpy.ops.object.select_all(action='DESELECT'); obj.select_set(True); bpy.context.view_layer.objects.active = obj
 bpy.ops.object.vertex_group_limit_total(group_select_mode='ALL', limit=4)
 bpy.ops.object.vertex_group_normalize_all(lock_active=False)
