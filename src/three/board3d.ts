@@ -567,6 +567,7 @@ export async function createBoard3D(onSquareClick: (index: number) => void, them
       const o = state.opponent;
       setOpponent(o ? `${o.id}:${o.color}` : '');
       opp?.setLost(!!o?.lost);
+      opp?.setInCheck?.(!!o && state.inCheck && state.game.turn === o.color);
       // 새 수 하나가 둬진 거면 움직임으로, 아니면(무르기·다시 시작) 바로 맞춤
       const newMove = prev !== null && state.lastMove !== null && state.lastMove !== prev.lastMove;
       let animated = false;
@@ -586,6 +587,11 @@ export async function createBoard3D(onSquareClick: (index: number) => void, them
             ? opp.reach(squarePosition(state.lastMove!.from), squarePosition(state.lastMove!.to), MOVE_TIME) : 0;
           animateMove(prev!.game, state.lastMove!, state.game, delay);
           animated = true;
+          // 잡는 수였으면 (앙파상 포함: 기물 수가 줄었으면) 상대가 반응 — 기물이 내려앉은 뒤에
+          const count = (g: GameState) => g.board.reduce((n, p) => n + (p ? 1 : 0), 0);
+          if (opp?.react && o && count(state.game) < count(prev!.game)) {
+            opp.react(mover.color === o.color ? 'captured' : 'lostPiece', delay + MOVE_TIME);
+          }
         }
       }
       if (!animated) {
