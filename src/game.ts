@@ -92,7 +92,7 @@ export function say(event: SpeechEvent, id: string | null): boolean {
   if (!id) return false;
   const persona = findPersonality(id);
   const lines = persona.lines?.[event];
-  if (!lines || lines.length === 0 || Math.random() >= SPEAK_CHANCE[event]) return false;
+  if (!lines || lines.length === 0 || Math.random() >= (persona.speakChance?.[event] ?? SPEAK_CHANCE[event])) return false;
   speech = { text: lines[Math.floor(Math.random() * lines.length)], by: persona.name };
   return true;
 }

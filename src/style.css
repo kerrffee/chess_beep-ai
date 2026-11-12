@@ -464,3 +464,16 @@ body.full3d .tab { padding: 6px 12px; font-size: 13px; }
 }
 .slider input { flex: 1; min-width: 0; accent-color: #c9a46a; }
 .slider-value { width: 2.6em; text-align: right; font-variant-numeric: tabular-nums; }
+
+/* characters.jsonc 안내 (main.ts 맨 아래) */
+.config-warn {
+  position: fixed; top: 8px; left: 50%; transform: translateX(-50%); z-index: 1000;
+  max-width: min(720px, 94vw); max-height: 60vh; overflow: auto;
+  background: #3a1416; color: #ffd9d9; border: 1px solid #b4474d; border-radius: 8px;
+  padding: 10px 36px 10px 14px; font-size: 13px; line-height: 1.5; box-shadow: 0 6px 24px rgba(0, 0, 0, .5);
+}
+.config-warn ul { margin: 6px 0 0; padding-left: 18px; }
+.config-warn button {
+  position: absolute; top: 6px; right: 8px; background: none; border: none; color: inherit;
+  font-size: 18px; cursor: pointer;
+}

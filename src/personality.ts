@@ -1,4 +1,5 @@
 // ---------- 성격 ----------
+// ※ 대사·수 두는 성향·3D 동작은 맨 위 폴더의 characters.jsonc에서 고치면 됨 (여기 값은 기본값, characterConfig.ts가 덮어씀)
 // 성격 하나 = 설정 묶음 하나. 새 성격은 아래 PERSONALITIES에 하나 더 적기만 하면 메뉴에 생김
 // 성격은 "말"만이 아니라 "수를 고르는 방식"에서도 나와야 재밌음:
 //   기물 값(values), 평가 가중치(weights), 생각 시간(timeLimit), 실수 확률(mistakeChance),
@@ -36,6 +37,7 @@ export interface Personality {
   resignAt?: number;      // AI 입장 점수가 이보다 낮은 게 2수 연속이면 기권 (없으면 절대 기권 안 함)
   resignOnQueenLoss?: boolean; // true면 "내 퀸이 먹힐 수밖에 없다"고 보는 순간 바로 기권 (퀸 사랑꾼용)
   lines?: Partial<Record<SpeechEvent, string[]>>; // 상황별 대사 (없거나 빈 목록이면 조용히)
+  speakChance?: Partial<Record<SpeechEvent, number>>; // 상황별 말할 확률 0~1 (없으면 game.ts의 SPEAK_CHANCE)
 }
 
 export const PERSONALITIES: Personality[] = [

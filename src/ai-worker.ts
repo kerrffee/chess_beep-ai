@@ -15,6 +15,7 @@
 //    white, black = 성격 id. timeLimit = 생각하는 AI 모두의 한 수 시간(ms)
 //    → { type: 'gameResult', id, result, reason, ucis }
 //      result = '1-0' | '0-1' | '1/2-1/2', reason = 끝난 이유, ucis = 둔 수 목록
+import './loadUserConfig'; // characters.jsonc의 수 두는 성향을 AI 일꾼에도 적용 (맨 먼저)
 import { chooseMove, stats, moveToUci, scoreAfterMove } from './ai';
 import { findPersonality } from './personality';
 import { initialGame, type GameState } from './board';

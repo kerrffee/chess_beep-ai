@@ -1,3 +1,4 @@
+import { configMessages } from './loadUserConfig'; // characters.jsonc (캐릭터 대사·성향·3D 동작) — 다른 것보다 먼저
 import './style.css';
 import { initialGame, type Color, type GameState, type PieceType } from './board';
 import { makeMove, legalMoves, inCheck, gameStatus, type Move } from './moves';
@@ -470,3 +471,21 @@ window.addEventListener('resize', () => { const wide = window.innerWidth > 760; 
 // 테스트용: 3D 판을 몇 번 그렸는지 (가만히 있을 때 안 늘어나는지 확인)
 Object.assign(window, { __chess3dRenders: () => board3D?.renderCount() ?? 0 });
 render();
+
+// ---------- characters.jsonc 안내 ----------
+// 설정 파일에 문법 오류나 모르는 항목이 있으면 화면 위에 알려 줌 (× 로 닫기). 개발자 도구 콘솔에도 남김
+if (configMessages.length) {
+  console.warn('characters.jsonc 안내:\n' + configMessages.join('\n'));
+  const box = document.createElement('div');
+  box.className = 'config-warn';
+  const title = document.createElement('b');
+  title.textContent = '캐릭터 설정 파일(characters.jsonc) 확인할 것';
+  const close = document.createElement('button');
+  close.textContent = '×';
+  close.onclick = () => box.remove();
+  const list = document.createElement('ul');
+  for (const m of configMessages.slice(0, 12)) { const li = document.createElement('li'); li.textContent = m; list.append(li); }
+  if (configMessages.length > 12) { const li = document.createElement('li'); li.textContent = `… 외 ${configMessages.length - 12}개 (콘솔에 전부)`; list.append(li); }
+  box.append(close, title, list);
+  document.body.append(box);
+}
