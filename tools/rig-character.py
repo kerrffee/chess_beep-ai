@@ -96,8 +96,13 @@ for o in list(bpy.context.scene.objects):
     if o != obj: bpy.data.objects.remove(o)
 obj.name = which
 me = obj.data
-# 안 쓰는 UV(두 번째부터)와 접선 지우기
-while len(me.uv_layers) > 1: me.uv_layers.remove(me.uv_layers[-1])
+# UV는 하나만 남김. Fab 변환 모델은 첫 번째 UV가 그림과 안 맞고(입히면 흙색 한 가지가 됨)
+# 두 번째 UV가 진짜 그림 좌표라서, UV가 여러 벌이면 두 번째를 남김 (2026-11-12 색이 생략돼 보이던 문제)
+keep = me.uv_layers[1].name if len(me.uv_layers) > 1 else me.uv_layers[0].name
+for name in [l.name for l in me.uv_layers if l.name != keep]:
+    me.uv_layers.remove(me.uv_layers[name])
+me.uv_layers.active = me.uv_layers[keep]
+me.uv_layers[keep].active_render = True
 
 # 붙어 있어야 할 점 합치기 (메시가 3조각으로 잘려 있음)
 bm = bmesh.new(); bm.from_mesh(me)
@@ -220,6 +225,44 @@ if which in ('queenlover', 'random'):
             for g in list(v.groups): obj.vertex_groups[g.group].remove([v.index])
             obj.vertex_groups[best].add([v.index], 1.0, 'REPLACE'); far_n += 1
     print('머리로 고정:', head_n, '/ 팔에서 먼 자락 → 몸 뼈로:', far_n)
+# 퀸 사랑꾼: 팔 무게를 거리로 다시 정함 (2026-11-12). 랜덤에 써 보니 팔 옆 넝마 천이 세로로 늘어나서 퀸 사랑꾼만
+# 자동 무게는 망토에 덮인 위팔을 몸에 붙여서, 팔을 뻗으면 어깨~팔꿈치가 판처럼 늘어났음
+# → 팔 뼈 둘레 QL_ARM_R 안의 점은 팔을 따라가고(경계는 부드럽게), 그 밖(망토 자락)은 팔 무게를 빼고 몸을 따라감
+QL_ARM_R = (0.07, 0.10)   # 위팔·아래팔: 이 거리(m)까지는 팔, 끝에서 0
+QL_HAND_R = (0.10, 0.14)  # 손·손가락(발톱이 길어서 넓게)
+if which == 'queenlover':
+    gname = {g.index: g.name for g in obj.vertex_groups}
+    ARMP = ('upperarm', 'lowerarm', 'hand', 'middle')
+    isarm = lambda n: n.split('_')[0] in ARMP
+    body = {n: ab for n, ab in segs.items() if not isarm(n) and not n.startswith('clavicle')}
+    def dist(co, ab):
+        t = max(0, min(1, intersect_point_line(co, *ab)[1])); return (co - (ab[0] + (ab[1] - ab[0]) * t)).length
+    ramp = lambda x, lo, hi: max(0.0, min(1.0, (hi - x) / (hi - lo)))
+    n_arm = 0
+    for v in me.vertices:
+        if v.co.z > 0.52: continue  # 후광·왕관은 머리
+        best = None
+        for s in 'lr':
+            ks = {f'upperarm_{s}': ramp(dist(v.co, segs[f'upperarm_{s}']), *QL_ARM_R),
+                  f'lowerarm_{s}': ramp(dist(v.co, segs[f'lowerarm_{s}']), *QL_ARM_R),
+                  f'hand_{s}': ramp(min(dist(v.co, segs[f'hand_{s}']), dist(v.co, segs[f'middle_01_{s}'])), *QL_HAND_R)}
+            a = max(ks.values())
+            if best is None or a > best[0]: best = (a, ks)
+        a, ks = best
+        gs = [(gname[g.group], g.weight) for g in v.groups]
+        rest = [(n, w) for n, w in gs if not isarm(n)]
+        rw = sum(w for _, w in rest)
+        for n, _ in gs: obj.vertex_groups[n].remove([v.index])
+        if a < 1:
+            if rw < 1e-4:
+                rest = [(min(body, key=lambda n: dist(v.co, body[n])), 1.0)]; rw = 1.0
+            for n, w in rest: obj.vertex_groups[n].add([v.index], (1 - a) * w / rw, 'ADD')
+        if a > 0:
+            tot = sum(ks.values())
+            for n, k in ks.items():
+                if k > 0: obj.vertex_groups[n].add([v.index], a * k / tot, 'ADD')
+            n_arm += 1
+    print('팔 무게를 거리로 다시 정한 점:', n_arm)
 bpy.ops.object.select_all(action='DESELECT'); obj.select_set(True); bpy.context.view_layer.objects.active = obj
 bpy.ops.object.vertex_group_limit_total(group_select_mode='ALL', limit=4)
 bpy.ops.object.vertex_group_normalize_all(lock_active=False)

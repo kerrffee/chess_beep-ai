@@ -50,6 +50,9 @@ interface Style {
   reachOut: number;     // 돌아오는 시간
   rimColor: number;     // 등 뒤 윤곽 빛 색
   grip?: [number, number, number]; // 기물을 집을 때 손목 위치 (기물 기준, 칸). 없으면 (0, 2.1, -1.1)
+  // 처음(서 있는) 자세에서 왼손 손바닥이 향하는 쪽 (캐릭터 기준, 오른손은 좌우 거울). 있으면 기물을 집을 때
+  // 손바닥이 기물 쪽(아래·몸 쪽)을 보도록 손목을 손끝 축으로 비틂. 없으면 손끝 방향만 맞춤
+  palm?: [number, number, number];
 }
 const STYLES: Record<Who, Style> = {
   // 겁쟁이(2): 욕심쟁이(2)와 같은 방식. 오른손 갈고리가 6칸쯤 길어서 손목을 높이 두고 갈고리 끝으로 기물을 걸어 끎
@@ -70,7 +73,7 @@ const STYLES: Record<Who, Style> = {
   // 돌격대장, 랜덤, 퀸 사랑꾼: 욕심쟁이(2)와 같은 방식 (tools/rig-character.py)
   attacker: { file: 'attacker.glb', rig: { strip: null, unit: 100 }, reachIn: 300, reachOut: 300, rimColor: 0xb8e0a0 },
   random: { file: 'random.glb', rig: { strip: null, unit: 100 }, reachIn: 700, reachOut: 450, rimColor: 0xd8c8f0, grip: [0, 2.6, -1.1] },
-  queenlover: { file: 'queenlover.glb', rig: { strip: null, unit: 100 }, reachIn: 900, reachOut: 600, rimColor: 0xffd8f0 },
+  queenlover: { file: 'queenlover.glb', rig: { strip: null, unit: 100 }, reachIn: 900, reachOut: 600, rimColor: 0xffd8f0, palm: [0, 0, 1] },
 };
 
 const X = new THREE.Vector3(1, 0, 0), Y = new THREE.Vector3(0, 1, 0), Z = new THREE.Vector3(0, 0, 1);
@@ -86,12 +89,29 @@ const randomSlot = (t: number) => { const slot = Math.floor(t / RANDOM_SLOT); re
 // 살짝 지나쳤다가 돌아오는 움직임 (돌격대장이 기물을 밀어붙일 때)
 const overshoot = (k: number) => { const c = 1.9, u = k - 1; return k <= 0 ? 0 : k >= 1 ? 1 : 1 + (c + 1) * u * u * u + c * u * u; };
 
+// 기물을 집을 때 손바닥이 향할 쪽 (캐릭터 기준): 아래, 조금 몸 쪽
+const PALM_GRIP = new THREE.Vector3(0, -0.45, -1).normalize();
+// 손을 손끝 축(손 → mid) 둘레로 돌려서 손바닥(palmLocal, 손 뼈 기준)이 want(캐릭터 기준) 쪽을 보게. k = 얼마나(0~1)
+function twistPalm(r: Rig, hand: THREE.Bone, mid: THREE.Bone, palmLocal: THREE.Vector3, want: THREE.Vector3, k: number) {
+  const axis = bonePos(r, mid).sub(bonePos(r, hand)).normalize();
+  const rootQ = r.root.getWorldQuaternion(new THREE.Quaternion());
+  const handQ = rootQ.clone().invert().multiply(hand.getWorldQuaternion(new THREE.Quaternion())); // 캐릭터 기준 손 회전
+  const cur = palmLocal.clone().applyQuaternion(handQ);
+  const a = cur.addScaledVector(axis, -cur.dot(axis));
+  const b = want.clone().addScaledVector(axis, -want.dot(axis));
+  if (a.lengthSq() < 1e-6 || b.lengthSq() < 1e-6) return;
+  a.normalize(); b.normalize();
+  const angle = Math.atan2(new THREE.Vector3().crossVectors(a, b).dot(axis), a.dot(b));
+  turn(r, hand, axis, angle * k);
+}
+
 export function createHuman(who: Who, deskTop: number): Opponent {
   const style = STYLES[who];
   const group = new THREE.Group();
   const floorY = deskTop - DESK.height;
   let rig: Rig | null = null;
   const tips: { l?: THREE.Bone; r?: THREE.Bone } = {};
+  const palmLocal: { l?: THREE.Vector3; r?: THREE.Vector3 } = {}; // 손바닥 방향 (손 뼈 기준)
   let disposed = false;
 
   // 등 뒤에서 비추는 빛 (어두운 방에서도 윤곽이 보이게) + 얼굴 쪽 약한 빛
@@ -127,6 +147,17 @@ export function createHuman(who: Who, deskTop: number): Opponent {
       hand.add(tip);
       tip.position.copy(hand.worldToLocal(tipWorld));
       tips[s] = tip;
+    }
+    // 손바닥 방향을 손 뼈 기준으로 저장 (처음 자세에서)
+    if (style.palm) {
+      const rootQ = r.root.getWorldQuaternion(new THREE.Quaternion());
+      for (const s of ['l', 'r'] as const) {
+        const hand = r.bone('hand_' + s);
+        if (!hand) continue;
+        const [x, y, z] = style.palm;
+        const world = new THREE.Vector3(s === 'l' ? x : -x, y, z).applyQuaternion(rootQ);
+        palmLocal[s] = world.applyQuaternion(hand.getWorldQuaternion(new THREE.Quaternion()).invert()).normalize();
+      }
     }
     // 엉덩이가 의자 높이에 오게 통째로 내림
     const pelvisY = r.restWorld('pelvis').y;
@@ -491,6 +522,9 @@ export function createHuman(who: Who, deskTop: number): Opponent {
         }
         if (s === 'r' && reachK > 0) dir.lerp(who === 'bluffer' ? new THREE.Vector3(0, -0.45, 1) : who === 'coward' ? new THREE.Vector3(0, -0.6, 1) : new THREE.Vector3(0, -1, 0.45), reachK);
         aim(r, hand, mid, dir);
+        // 기물을 집는 동안: 손바닥이 아래·몸 쪽을 보게 손끝 축으로 비틂 (안 하면 손등으로 집는 경우가 있음)
+        const pl = palmLocal[s];
+        if (pl && s === 'r' && reachK > 0) twistPalm(r, hand, mid, pl, PALM_GRIP, reachK);
       }
     }
     return busy;
