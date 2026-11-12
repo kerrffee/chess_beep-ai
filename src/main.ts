@@ -63,9 +63,11 @@ const PIECE_SET_LIST = [
 ];
 let pieceSet3D = remember('chess.pieceSet', 'marble');
 // '앉아서' 시점의 거리(앞뒤)와 눈높이. 설정 판의 슬라이더로 조절하고 브라우저에 저장
-const SEAT_DEFAULT = { distance: 30, height: 8.4 };
-let seatDistance = Number(remember('chess.seatDistance', String(SEAT_DEFAULT.distance))) || SEAT_DEFAULT.distance;
-let seatHeight = Number(remember('chess.seatHeight', String(SEAT_DEFAULT.height))) || SEAT_DEFAULT.height;
+// 기본값 44·14 = 슬라이더 가운데. 저장 키는 기본값을 바꾸면서 새 이름으로 (예전에 저장한 30·8.4 근처 값이 새 기본값을 덮지 않게)
+const SEAT_DEFAULT = { distance: 44, height: 14 };
+const SEAT_RANGE = { distance: [29, 59], height: [4, 24] } as const;
+let seatDistance = Number(remember('chess.seatDistance2', String(SEAT_DEFAULT.distance))) || SEAT_DEFAULT.distance;
+let seatHeight = Number(remember('chess.seatHeight2', String(SEAT_DEFAULT.height))) || SEAT_DEFAULT.height;
 
 // 이름 + 슬라이더 + 지금 값. 끄는 동안 바로바로 반영 (화면 전체를 다시 그리지 않아서 끌기가 끊기지 않음)
 function makeSlider(label: string, min: number, max: number, step: number, value: number, onInput: (v: number) => void): HTMLElement {
@@ -329,14 +331,14 @@ function renderPlay(app: HTMLElement) {
       render();
     }));
     if (view3D === 'seat') {
-      viewRow.appendChild(makeSlider('시야 앞뒤', 14, 44, 0.5, seatDistance, v => {
+      viewRow.appendChild(makeSlider('시야 앞뒤', SEAT_RANGE.distance[0], SEAT_RANGE.distance[1], 0.5, seatDistance, v => {
         seatDistance = v;
-        keep('chess.seatDistance', String(v));
+        keep('chess.seatDistance2', String(v));
         board3D?.setSeat(seatDistance, seatHeight);
       }));
-      viewRow.appendChild(makeSlider('시야 높이', 2, 22, 0.2, seatHeight, v => {
+      viewRow.appendChild(makeSlider('시야 높이', SEAT_RANGE.height[0], SEAT_RANGE.height[1], 0.2, seatHeight, v => {
         seatHeight = v;
-        keep('chess.seatHeight', String(v));
+        keep('chess.seatHeight2', String(v));
         board3D?.setSeat(seatDistance, seatHeight);
       }));
     }

@@ -96,7 +96,7 @@ export async function createBoard3D(onSquareClick: (index: number) => void, them
   controls.enableDamping = true;            // 손을 떼도 부드럽게 멈춤
   controls.maxPolarAngle = Math.PI * 0.47;  // 판 아래로는 못 내려가게
   controls.minDistance = 5;
-  controls.maxDistance = 55;
+  controls.maxDistance = 75;               // '앉아서' 시야 앞뒤 최대(59)보다 멀리까지
   controls.enablePan = false;               // 판이 화면 밖으로 밀려나지 않게
 
   const ambient = new THREE.AmbientLight(0xffffff, 0.15);
@@ -463,7 +463,7 @@ export async function createBoard3D(onSquareClick: (index: number) => void, them
   // ── 카메라 ──
   let flipped = false;
   let view: CameraView = 'seat';
-  let seatDistance = 30, seatHeight = 8.4; // '앉아서' 시점: 판 가운데에서 내 쪽으로 떨어진 거리, 판 위 눈높이 (칸 단위)
+  let seatDistance = 44, seatHeight = 14; // '앉아서' 시점: 판 가운데에서 내 쪽으로 떨어진 거리, 판 위 눈높이 (칸 단위)
   function placeCamera() {
     const side = flipped ? -1 : 1; // 흑 쪽에서 보면 반대편
     requestRender();
@@ -615,7 +615,17 @@ export async function createBoard3D(onSquareClick: (index: number) => void, them
       applyTheme(themeId);
     },
     setView(v) { view = v; placeCamera(); },
-    setSeat(d, h) { seatDistance = d; seatHeight = h; if (view === 'seat') placeCamera(); },
+    // 슬라이더를 움직이면 카메라를 처음 자리로 되돌리지 않고, 지금 자리(확대·돌린 상태 그대로)에서 바뀐 만큼만 옮김
+    setSeat(d, h) {
+      const dd = d - seatDistance, dh = h - seatHeight;
+      seatDistance = d; seatHeight = h;
+      if (view !== 'seat' || (dd === 0 && dh === 0)) return;
+      const side = flipped ? -1 : 1;
+      camera.position.y += dh;
+      camera.position.z += dd * side;
+      controls.update();
+      requestRender();
+    },
     moveLandsIn: () => Math.max(0, landingAt - performance.now()),
     // 화면을 다시 그리는 동안엔 이 상자가 잠깐 떨어져 있어서(너비 0) 바로 맞추면 무시됨 → 다음 화면 갱신 때 맞춤
     setRightInset(px) { if (px !== rightInset) { rightInset = px; requestAnimationFrame(resize); } },
