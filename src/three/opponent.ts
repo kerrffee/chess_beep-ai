@@ -1,7 +1,7 @@
 // ---------- 판 건너편에 앉은 상대 캐릭터 ----------
 // 성격마다 모양이 다름. 지금 있는 것:
 //   대가(master): 가면 쓴 로브 인물, 손대지 않고 구슬 빛으로 기물을 움직임 → master.ts
-//   겁쟁이(coward), 욕심쟁이(greedy), 허세꾼(bluffer): 뼈대 있는 사람 모델 → human.ts
+//   겁쟁이(coward), 욕심쟁이(greedy), 허세꾼(bluffer), 핑계왕(excuser): 뼈대 있는 사람 모델 → human.ts
 //   혼돈(chaos): 마녀 모자를 쓴 작은 유령 → ghost.ts
 // 캐릭터가 없는 성격은 null (빈 자리)
 //
@@ -28,7 +28,7 @@ export interface Opponent {
 // 성격 id → 캐릭터 (없으면 null)
 export function createOpponent(id: string, deskTop: number): Opponent | null {
   if (id === 'master') return createMaster(deskTop);
-  if (id === 'coward' || id === 'greedy' || id === 'bluffer') return createHuman(id, deskTop);
+  if (id === 'coward' || id === 'greedy' || id === 'bluffer' || id === 'excuser') return createHuman(id, deskTop);
   if (id === 'chaos') return createGhost(deskTop);
   return null;
 }

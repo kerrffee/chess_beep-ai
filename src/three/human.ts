@@ -1,4 +1,4 @@
-// ---------- 모델 파일로 만든 사람 캐릭터: 겁쟁이, 욕심쟁이, 허세꾼 ----------
+// ---------- 모델 파일로 만든 사람 캐릭터: 겁쟁이, 욕심쟁이, 허세꾼, 핑계왕 ----------
 // 모델은 서 있는 A자 자세라서, 매 화면마다 뼈를 돌려 의자에 앉히고 팔을 책상 위에 둠
 // (애니메이션 파일 없이 코드로 자세를 만듦 → characterModel.ts의 aim, turn, reachIK)
 //
@@ -16,12 +16,16 @@
 //         수를 둘 때 손을 높이 들었다가 멋을 부리며 내려놓음
 //         기물을 잡으면 더 젖히며 두 팔을 벌림("당연하지"), 잡히면 "괜찮은 척" 고개를 휙휙 저음
 //         체크당하면 몸을 세우고 한 손으로 턱을 괴고 고민, 지면 두 손을 머리 뒤로 깍지 끼고 딴 데를 봄 ("봐준 거야")
+// 핑계왕: 바위 괴물. 평범하게 똑바로 앉음. 가끔 오른손을 들어 털며 쳐다봄 ("손가락이 좀 아픈데…")
+//         기물을 잡으면 왼손으로 가슴을 툭툭 ("이건 실력이지")
+//         자기 기물을 잡히면 고개를 휙 들어 천장 조명을 가리킴 ("조명 때문에 잘 안 보였어")
+//         체크당하면 왼손으로 뒷머리를 긁적, 지면 의자에 기대 왼팔로 딴 데를 가리키고 오른손은 어깨 으쓱 ("와이파이 때문이야")
 import * as THREE from 'three';
 import type { Opponent } from './opponent';
 import { DESK } from './room';
 import { aim, bonePos, loadRig, reachIK, turn, type Rig, type RigOptions } from './characterModel';
 
-type Who = 'coward' | 'greedy' | 'bluffer';
+type Who = 'coward' | 'greedy' | 'bluffer' | 'excuser';
 
 const PELVIS_Z = -11.2;   // 엉덩이 위치 (판 가운데에서)
 const SEAT_H = 8.8;       // 의자 앉는 면 높이 (바닥에서, 칸) ≈ 51cm
@@ -36,9 +40,10 @@ interface Style {
 }
 const STYLES: Record<Who, Style> = {
   coward: { file: 'coward.glb', rig: { strip: /_\d$/ }, reachIn: 950, reachOut: 260, rimColor: 0xa8b8d8 },
-  greedy: { file: 'greedy.glb',
-    // 허리에 찬 칼은 허리에 고정, 오른손에 쥔 단검은 숨김 (체스 둘 때 책상을 뚫고 나와서)
-    rig: { strip: /_\d+$/, reparent: { weapon_l: 'pelvis' }, hideBones: ['weapon_r'] }, reachIn: 190, reachOut: 360, rimColor: 0xffc890 },
+  // 욕심쟁이(2): 원본에 뼈대가 없어서 Blender로 뼈대를 만들어 붙임 (뼈 이름이 처음부터 자세 코드 이름, m 단위)
+  greedy: { file: 'greedy.glb', rig: { strip: null, unit: 100 }, reachIn: 190, reachOut: 360, rimColor: 0xffc890 },
+  // 핑계왕: 욕심쟁이(2)와 같은 방식
+  excuser: { file: 'excuser.glb', rig: { strip: null, unit: 100 }, reachIn: 520, reachOut: 380, rimColor: 0xe0c8a8 },
   // 허세꾼: m 단위, 뼈 이름이 Mixamo 식 → 자세 코드가 쓰는 이름으로 바꿈 (손가락 뼈는 없어서 손바닥 방향은 그대로 둠)
   bluffer: { file: 'bluffer.glb',
     rig: { strip: null, unit: 100, rename: {
@@ -55,6 +60,8 @@ const ease = (k: number) => (k <= 0 ? 0 : k >= 1 ? 1 : k < 0.5 ? 2 * k * k : 1 -
 const clamp01 = (k: number) => Math.min(1, Math.max(0, k));
 // 0~1 사이 고정된 무작위 수 (같은 n이면 늘 같은 값) — 두리번거릴 방향 고르기용
 const hash = (n: number) => { const s = Math.sin(n * 127.1 + 311.7) * 43758.5453; return s - Math.floor(s); };
+// 핑계왕이 아픈 손을 터는 정도 (0~1): 7초마다 1.6초 동안
+const excuserShake = (t: number) => { const u = t % 7; return u < 1.6 ? Math.sin(Math.PI * u / 1.6) : 0; };
 
 export function createHuman(who: Who, deskTop: number): Opponent {
   const style = STYLES[who];
@@ -193,6 +200,21 @@ export function createHuman(who: Who, deskTop: number): Opponent {
       lookYaw += Math.sin(clamp01(flinch / 1.2) * Math.PI * 6) * 0.45 * flinchK; // 잡히면 "아니야" 고개 저음
       lookYaw = lookYaw * (1 - sm.lost) + sm.lost * 0.7;
       lookPitch = 0.12 - gloatK * 0.3 + sm.check * 0.35 - sm.lost * 0.1;
+    } else if (who === 'excuser') {
+      // 똑바로 앉음. 손을 털 때는 그 손을 봄, 잡히면 고개를 들어 조명 쪽, 지면 기대서 가리키는 쪽을 봄
+      lean = 0.08 - gloatK * 0.12 + sm.check * 0.05 - sm.lost * 0.32;
+      lookYaw = Math.sin(t * 2 * Math.PI / 9) * 0.08 * (1 - sm.lost);
+      lookPitch = 0.42 - gloatK * 0.25;
+      const shakeK = excuserShake(t) * (1 - sm.check) * (1 - sm.lost);
+      lookYaw = lookYaw * (1 - shakeK) - shakeK * 0.35;   // 오른손(화면 왼쪽)을 봄
+      lookPitch += shakeK * 0.15;
+      lookYaw = lookYaw * (1 - flinchK) + flinchK * 0.45;  // 잡히면 왼쪽 위 조명을 봄
+      lookPitch -= flinchK * 0.95;
+      lookPitch += sm.check * 0.2;                         // 체크: 고개를 숙이고 긁적
+      lookYaw += sm.check * Math.sin(t * Math.PI * 2 * 0.6) * 0.1;
+      // 지면: 가리키는 쪽(왼쪽)을 보며 가끔 고개를 저음
+      lookYaw = lookYaw * (1 - sm.lost) + sm.lost * (0.6 + Math.sin(t * Math.PI * 2 * 0.9) * 0.12);
+      lookPitch = lookPitch * (1 - sm.lost) + sm.lost * 0.1;
     } else {
       lean = 0.26 - gloatK * 0.32 + flinchK * 0.12 + sm.check * 0.1 - sm.lost * 0.5;
       lookYaw = Math.sin(t * 2 * Math.PI / 5.5) * 0.22 * (1 - sm.lost); // 판을 천천히 훑어봄
@@ -241,6 +263,34 @@ export function createHuman(who: Who, deskTop: number): Opponent {
         if (gloatK > 0) want[s].lerp(headPos.clone().add(new THREE.Vector3(side * 5.5, -1.2, 2.2)), gloatK);
         // 짐: 두 손을 머리 뒤로 깍지
         if (sm.lost > 0) want[s].lerp(headPos.clone().add(new THREE.Vector3(side * 0.9, 0.4, -1.4)), sm.lost);
+      } else if (who === 'excuser') {
+        // 평소: 두 손을 책상 모서리에 편하게
+        want[s] = G(side * 2.3, deskTop + 0.6, DESK_EDGE + 1.3);
+        // 아픈 손 털기: 오른손을 가슴 앞으로 들어 좌우로 탈탈
+        const shakeK = excuserShake(t) * (1 - sm.check) * (1 - sm.lost);
+        if (s === 'r' && shakeK > 0) {
+          const wob = Math.sin(t * Math.PI * 2 * 5) * 0.45;
+          want[s].lerp(G(-1.4 + wob, deskTop + 3.0, DESK_EDGE - 0.6), shakeK);
+        }
+        // 잡음: 왼손으로 가슴을 툭툭
+        if (s === 'l' && gloatK > 0) {
+          const chest = b('spine_03') ? bonePos(r, b('spine_03')!) : G(0, deskTop + 4, PELVIS_Z);
+          const tap = Math.max(0, Math.sin(gloat * Math.PI * 2 * 3)) * 0.5;
+          want[s].lerp(chest.clone().add(new THREE.Vector3(0.7, 0, 2.0 + tap)), gloatK);
+        }
+        // 잡힘: 왼팔을 쭉 뻗어 왼쪽 위 천장(조명)을 가리킴
+        if (s === 'l' && flinchK > 0) want[s].lerp(headPos.clone().add(new THREE.Vector3(4.2, 3.2, 3.0)), flinchK);
+        // 체크: 왼손으로 뒷머리를 긁적
+        if (s === 'l' && sm.check > 0) {
+          const scratch = Math.sin(t * Math.PI * 2 * 3.5) * 0.25;
+          want[s].lerp(headPos.clone().add(new THREE.Vector3(0.9, 0.5 + scratch, -0.6)), sm.check);
+        }
+        // 짐: 왼팔은 옆으로 뻗어 딴 데를 가리키고, 오른손은 어깨 높이로 들어 으쓱
+        if (sm.lost > 0) {
+          const target = s === 'l' ? headPos.clone().add(new THREE.Vector3(5.5, -1.0, 2.5))
+            : headPos.clone().add(new THREE.Vector3(-2.6, -2.6 + Math.max(0, Math.sin(t * Math.PI * 2 * 0.45)) * 0.8, 1.6));
+          want[s].lerp(target, sm.lost);
+        }
       } else {
         // 평소: 팔꿈치를 책상에 대고 앞쪽에서 손을 비빔
         const rub = Math.sin(t * Math.PI * 2 * (gloatK > 0 ? 4 : 1.1)) * (0.22 + gloatK * 0.35);
@@ -283,6 +333,11 @@ export function createHuman(who: Who, deskTop: number): Opponent {
           if (s === 'r') dir.lerp(new THREE.Vector3(0, 1, 0.15), sm.check);
           dir.lerp(new THREE.Vector3(side, 0.7, 0.4), gloatK);
           dir.lerp(new THREE.Vector3(-side, 0.3, -0.4), sm.lost);
+        }
+        if (who === 'excuser') {
+          // 가리킬 때는 손끝이 팔 방향으로 (잡힘: 왼쪽 위, 짐: 왼쪽 옆), 으쓱할 때는 바깥·앞으로
+          if (s === 'l') { dir.lerp(new THREE.Vector3(0.75, 0.55, 0.45), flinchK); dir.lerp(new THREE.Vector3(1, -0.1, 0.45), sm.lost); }
+          else dir.lerp(new THREE.Vector3(-0.7, 0.3, 0.6), sm.lost);
         }
         if (s === 'r' && reachK > 0) dir.lerp(who === 'bluffer' ? new THREE.Vector3(0, -0.45, 1) : new THREE.Vector3(0, -1, 0.45), reachK);
         aim(r, hand, mid, dir);
