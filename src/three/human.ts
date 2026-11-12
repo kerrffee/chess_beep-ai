@@ -89,10 +89,12 @@ const randomSlot = (t: number) => { const slot = Math.floor(t / RANDOM_SLOT); re
 // 살짝 지나쳤다가 돌아오는 움직임 (돌격대장이 기물을 밀어붙일 때)
 const overshoot = (k: number) => { const c = 1.9, u = k - 1; return k <= 0 ? 0 : k >= 1 ? 1 : 1 + (c + 1) * u * u * u + c * u * u; };
 
-// 기물을 집을 때 (palm이 있는 캐릭터): 아래팔을 제 축으로 돌려 손바닥이 아래를 보게 한 뒤, 손목은 손바닥 쪽으로만 굽힘
+// 기물을 집을 때 (palm이 있는 캐릭터): 아래팔을 제 축으로 돌려 손바닥이 아래를 보게 하고, 팔·손목을 거의 곧게 펴서 손끝으로 옮김
 // (손만 비틀면 손목이 손등 쪽으로 꺾여 보임 — 2026-11-12)
 const PALM_DOWN = new THREE.Vector3(0, -1, 0);
-const WRIST_FLEX = 1.0; // 손목을 손바닥 쪽으로 굽히는 각도(라디안, 약 57°)
+const WRIST_FLEX = -15 * Math.PI / 180; // 손목을 손바닥 쪽으로 굽히는 각도(라디안). 음수 = 손등 쪽(위)으로 젖힘, 지금 위로 15°
+const FINGER_REACH = 2.6; // 손목 → 손끝(발톱 끝) 길이 = 손 뼈(hand → middle_01) 길이의 몇 배
+const PIECE_TOP = 1.3;    // 손끝이 닿는 높이 (기물 바닥에서, 칸)
 // 손바닥 방향(캐릭터 기준) = 손 뼈 기준 palmLocal을 지금 손 회전으로
 function palmDir(r: Rig, hand: THREE.Bone, palmLocal: THREE.Vector3): THREE.Vector3 {
   const rootQ = r.root.getWorldQuaternion(new THREE.Quaternion());
@@ -203,7 +205,23 @@ export function createHuman(who: Who, deskTop: number): Opponent {
       const to = toRig(r.root.parent!.worldToLocal(reachAnim.to.clone()));
       // 손목은 기물 위, 살짝 몸 쪽 (허세꾼은 갑옷 손톱이 길어서 더 높고 뒤에서 손톱 끝으로 집음)
       const grip = new THREE.Vector3(...(style.grip ?? [0, 2.1, -1.1]));
-      const above = (p: THREE.Vector3) => p.clone().add(grip);
+      let above = (p: THREE.Vector3) => p.clone().add(grip);
+      if (style.palm) {
+        // 팔·손목을 거의 곧게 펴고 손끝으로 옮김: 손목은 '어깨 → 기물 윗부분' 선 위에서 손 길이만큼 앞
+        const sh = b('upperarm_r'), hd = b('hand_r'), md = b('middle_01_r');
+        if (sh && hd && md) {
+          const shoulder = bonePos(r, sh);
+          const len = bonePos(r, md).distanceTo(bonePos(r, hd)) * FINGER_REACH;
+          above = (p: THREE.Vector3) => {
+            const tipAt = p.clone().add(new THREE.Vector3(0, PIECE_TOP, 0));
+            // 손가락은 '어깨 → 손끝' 선에서 손목을 젖힌 만큼(WRIST_FLEX) 위로 기울어 있으니, 그 방향으로 손 길이만큼 뒤가 손목
+            const d = tipAt.clone().sub(shoulder).normalize();
+            const up = new THREE.Vector3(0, 1, 0).addScaledVector(d, -d.y).normalize();
+            const finger = d.multiplyScalar(Math.cos(WRIST_FLEX)).addScaledVector(up, -Math.sin(WRIST_FLEX));
+            return tipAt.addScaledVector(finger, -len);
+          };
+        }
+      }
       if (e < style.reachIn) {
         let k = e / style.reachIn;
         if (who === 'coward') {
