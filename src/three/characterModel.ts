@@ -2,6 +2,9 @@
 // 모델 파일: public/models/character/<이름>.glb (원본은 맥의 ~/Documents/Chees_beep/_model/character)
 //   coward.glb = 겁쟁이 (원본 겁쟁이.fbx를 glb로 바꿈, 그림 없이 색만)
 //   greedy.glb = 욕심쟁이 (원본 욕심쟁이.glb의 그림을 1024px로 줄이고 빠진 뼈 위치를 채움)
+//   bluffer.glb = 허세꾼 (원본 허세꾼.zip의 Character_output.fbx를 Blender로 glb로 바꿈, 갑옷 그림 1024px)
+//                 단위가 m이고 뼈 이름이 'LeftArm' 식이라 unit·rename 설정으로 맞춤 (human.ts)
+//   master.glb(대가), chaos.glb(혼돈)는 뼈대 방식이 달라서 master.ts, ghost.ts가 따로 불러옴
 //
 // 두 원본 모두 뼈대 정보가 조금씩 꼬여 있음 (뼈 위치가 0이거나, 메시마다 뼈가 따로 복사돼 있음)
 // 그래서 불러올 때 "뼈 이름 하나당 뼈 하나"인 깨끗한 뼈대를 새로 만들어 모든 메시에 다시 연결함
@@ -39,7 +42,7 @@ function loadScene(file: string): Promise<THREE.Group | null> {
 // 뼈 이름에서 파일마다 붙은 번호 꼬리 떼기 (strip = 뗄 꼬리 모양)
 //   욕심쟁이: /_\d+$/  'hand_l_021' → 'hand_l', 'spine_01_03' → 'spine_01'
 //   겁쟁이:   /_\d$/   중복 이름에 붙은 한 자리 번호만 'pelvis_4' → 'pelvis' ('spine_01'은 그대로)
-function cleanName(name: string, strip: RegExp | null): string {
+function cleanNameRaw(name: string, strip: RegExp | null): string {
   return strip ? name.replace(strip, '') : name;
 }
 
@@ -58,12 +61,16 @@ function guessJoint(name: string, worldOf: Map<string, THREE.Matrix4>): THREE.Ma
 
 export interface RigOptions {
   strip: RegExp | null;               // 뼈 이름에서 뗄 번호 꼬리
+  rename?: Record<string, string>;    // 뼈 이름 바꾸기 (꼬리를 뗀 뒤). 예: 'LeftArm' → 'upperarm_l' (자세 코드는 이 이름을 씀)
+  unit?: number;                      // 모델 1단위가 몇 cm인지 (기본 1 = cm. m 단위 모델은 100)
   reparent?: Record<string, string>;  // 이 뼈를 다른 부모에 붙임 (예: 허리에 찬 칼이 손을 따라다니지 않게)
   hideBones?: string[];               // 이 뼈들에만 붙은 메시는 숨김 (예: 손에 쥔 단검)
 }
 
 export async function loadRig(file: string, opt: RigOptions): Promise<Rig | null> {
   const stripNumber = opt.strip;
+  const cleanName = (name: string, strip: RegExp | null) => { const n = cleanNameRaw(name, strip); return opt.rename?.[n] ?? n; };
+  const scale = CM * (opt.unit ?? 1);
   const src = await loadScene(file);
   if (!src) return null;
   // 뼈대가 있는 모델은 그냥 clone하면 뼈 연결이 원본을 가리키므로, 메시만 새로 만들어 붙임 (모양 데이터는 공유)
@@ -155,10 +162,10 @@ export async function loadRig(file: string, opt: RigOptions): Promise<Rig | null
   // 4) 크기: cm → 칸, 발바닥 y=0, 가로 가운데 x=z=0 (처음 자세 기준)
   const box = new THREE.Box3();
   for (const m of meshes) { m.geometry.computeBoundingBox(); box.union(m.geometry.boundingBox!); }
-  holder.scale.setScalar(CM);
+  holder.scale.setScalar(scale);
   const pelvis = worldOf.get('pelvis');
   const center = pelvis ? new THREE.Vector3().setFromMatrixPosition(pelvis) : box.getCenter(new THREE.Vector3());
-  holder.position.set(-center.x * CM, -box.min.y * CM, -center.z * CM);
+  holder.position.set(-center.x * scale, -box.min.y * scale, -center.z * scale);
   root.updateMatrixWorld(true);
 
   const rest = new Map<string, THREE.Quaternion>();

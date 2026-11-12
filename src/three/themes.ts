@@ -21,7 +21,7 @@ export interface Theme {
   lightSquare: WoodLook;
   darkSquare: WoodLook;
   frame: WoodLook;
-  // ── 아래 셋은 적지 않아도 됨 (적지 않으면 클래식과 같게) ──
+  // ── 아래는 적지 않아도 됨 ──
   // 칸·테두리의 광택: roughness(0 매끈 ~ 1 거침), clearcoat(니스 코팅 0~1). 없으면 니스 칠한 나무
   boardFinish?: { roughness: number; clearcoat: number };
   // 기물에 모델의 조각 자국(노멀 맵)을 빌려 쓸지. 없으면 true(씀)
@@ -31,45 +31,6 @@ export interface Theme {
   // 고를 수 있는 체스 세트 (PIECE_SETS의 이름). 있으면 설정 판에 '체스 세트' 고르기가 생김
   pieceSets?: string[];
 }
-
-export const CLASSIC: Theme = {
-  id: 'classic',
-  name: '클래식',
-  modelMaterials: false,
-  background: 0x1b1612,
-  envIntensity: 0.6,
-  ambient: 0.15,
-  sunColor: 0xffe2b8, // 따뜻한 빛
-  sunIntensity: 2.2,
-  // 상아: 살짝 노란 흰색, 은은한 광택
-  whitePiece: {
-    color: 0xe8d6b0,
-    roughness: 0.35,
-    clearcoat: 0.5,
-    clearcoatRoughness: 0.25,
-  },
-  // 흑단: 아주 어두운 갈색, 반짝이는 코팅
-  blackPiece: {
-    color: 0x1c1410,
-    roughness: 0.3,
-    clearcoat: 1.0,
-    clearcoatRoughness: 0.08,
-  },
-  lightSquare: { base: '#d6b383', grain: '#a8834f' }, // 단풍나무
-  darkSquare: { base: '#6e4527', grain: '#3f2614' }, // 호두나무
-  frame: { base: '#3a2414', grain: '#1f130a' },
-};
-
-// 대리석: Poly Haven 모델의 원래 재질(대리석 판, 흰/검은 기물)을 그대로 씀
-// (아래 기물·판 색은 모델을 못 불러왔을 때만 쓰임)
-export const MARBLE: Theme = {
-  ...CLASSIC,
-  id: 'marble',
-  name: '대리석',
-  modelMaterials: true,
-  envIntensity: 0.8,
-  sunIntensity: 2.0,
-};
 
 // 미니멀·현대: 밝은 회색 스튜디오, 무광 흰색/검정 기물, 나뭇결 거의 없는 회색 판
 export const MINIMAL: Theme = {
@@ -139,11 +100,32 @@ export const FANTASY: Theme = {
   bloom: 0.9, // 기물 주변으로 빛이 은은하게 퍼짐
 };
 
+// ---------- 체스 세트 (판·기물 모양과 색) ----------
+// 스포트라이트 테마에서 고름. 예전 클래식·대리석 테마의 판·기물만 남긴 것 (방은 지움)
+export type PieceSet = Pick<Theme, 'modelMaterials' | 'whitePiece' | 'blackPiece' | 'lightSquare' | 'darkSquare' | 'frame' | 'boardFinish' | 'pieceCarving'>;
+
+// 클래식: 상아·흑단 기물, 단풍나무·호두나무 판
+const CLASSIC_SET: PieceSet = {
+  modelMaterials: false,
+  // 상아: 살짝 노란 흰색, 은은한 광택
+  whitePiece: { color: 0xe8d6b0, roughness: 0.35, clearcoat: 0.5, clearcoatRoughness: 0.25 },
+  // 흑단: 아주 어두운 갈색, 반짝이는 코팅
+  blackPiece: { color: 0x1c1410, roughness: 0.3, clearcoat: 1.0, clearcoatRoughness: 0.08 },
+  lightSquare: { base: '#d6b383', grain: '#a8834f' }, // 단풍나무
+  darkSquare: { base: '#6e4527', grain: '#3f2614' }, // 호두나무
+  frame: { base: '#3a2414', grain: '#1f130a' },
+};
+// 대리석: Poly Haven 모델의 원래 재질(대리석 판, 흰/검은 기물)을 그대로 씀
+// (기물·판 색은 모델을 못 불러왔을 때만 쓰임)
+const MARBLE_SET: PieceSet = { ...CLASSIC_SET, modelMaterials: true };
+
+export const PIECE_SETS: Record<string, PieceSet> = { marble: MARBLE_SET, classic: CLASSIC_SET };
+
 // 스포트라이트: 깜깜한 방, 천장에서 한 줄기 빛만 탁자 위로 떨어짐
-// 방에는 탁자(대리석 테마 것)와 나무 의자만 있음. 해(방향 빛)는 끄고, 방 안의 스포트라이트 하나로만 비춤
+// 방에는 대리석 탁자와 나무 의자만 있음. 해(방향 빛)는 끄고, 방 안의 스포트라이트 하나로만 비춤
 // 체스 세트는 대리석·클래식 중 고를 수 있음 (pieceSets)
 export const SPOTLIGHT: Theme = {
-  ...CLASSIC,
+  ...MARBLE_SET,
   id: 'spotlight',
   name: '스포트라이트',
   background: 0x000000, // 완전한 어둠
@@ -154,10 +136,10 @@ export const SPOTLIGHT: Theme = {
   pieceSets: ['marble', 'classic'],
 };
 
-export const THEMES: Theme[] = [CLASSIC, MARBLE, MINIMAL, FANTASY, SPOTLIGHT];
+// 첫 번째가 기본 테마 (저장된 테마가 없거나, 지금은 없는 테마일 때)
+export const THEMES: Theme[] = [SPOTLIGHT, MINIMAL, FANTASY];
 
-// 체스 세트(판·기물 모양)만 다른 테마에서 빌려 옴. 배경·조명은 원래 테마 그대로
-export const PIECE_SETS: Record<string, Theme> = { marble: MARBLE, classic: CLASSIC };
+// 체스 세트(판·기물 모양)만 바꿈. 배경·조명은 원래 테마 그대로
 export function withPieceSet(theme: Theme, setId: string): Theme {
   if (!theme.pieceSets) return theme;
   const src = PIECE_SETS[theme.pieceSets.includes(setId) ? setId : theme.pieceSets[0]];
@@ -169,4 +151,3 @@ export function withPieceSet(theme: Theme, setId: string): Theme {
     boardFinish: src.boardFinish, pieceCarving: src.pieceCarving,
   };
 }
-

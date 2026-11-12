@@ -1,5 +1,6 @@
 // ---------- 방 (책상, 벽, 바닥, 창문, 스탠드, 책장) ----------
-// 파일 없이 코드로 만든 단순한 방. 테마마다 색과 분위기만 다름
+// 미니멀·판타지: 파일 없이 코드로 만든 단순한 방. 테마마다 색과 분위기만 다름
+// 스포트라이트: 깜깜한 공간에 탁자·의자 모델만 (아래 buildSpotlightRoom)
 // 크기 기준: 체스판 한 칸 = 1 (실제로는 약 5.5cm). 그래서 책상 높이(약 75cm)는 약 13.6
 import * as THREE from 'three';
 import { loadFurniture, M } from './furniture';
@@ -15,22 +16,6 @@ interface RoomLook {
 }
 
 const LOOKS: Record<string, RoomLook> = {
-  // 클래식: 따뜻한 서재
-  classic: {
-    wall: 0x3d3229, wallLow: 0x2a211a, floor: 0x4a3324, ceiling: 0x221b16,
-    desk: 0x5a3320, deskRough: 0.5,
-    windowLight: 0xbcd4ff, windowGlow: 0.9, lampColor: 0xffc27a, lampIntensity: 40,
-    shelf: 0x3a2618, books: [0x7a2e2a, 0x2e4a3a, 0x8a6a3a, 0x2c3550, 0x5a4a3a],
-    rug: 0x5c2a24,
-  },
-  // 대리석: 밝은 갤러리
-  marble: {
-    wall: 0xcfc9bf, wallLow: 0xb3ada3, floor: 0x8f8a84, ceiling: 0xe0dcd5,
-    desk: 0x3b2a20, deskRough: 0.35,
-    windowLight: 0xfff4e0, windowGlow: 1.2, lampColor: 0xfff0d8, lampIntensity: 25,
-    shelf: 0x5a4a3e, books: [0x9a8c7a, 0x5a6a7a, 0xb8a888, 0x6a5a4a, 0x8a7a6a],
-    rug: 0x7a7066,
-  },
   // 미니멀: 하얀 작업실
   minimal: {
     wall: 0xecebe8, wallLow: 0xdedcd8, floor: 0xd4d2cd, ceiling: 0xf2f1ee,
@@ -51,40 +36,11 @@ const LOOKS: Record<string, RoomLook> = {
 
 export const DESK = { width: 18, depth: 13, thick: 0.5, height: 13.6 };
 
-// ── 모델 가구를 쓰는 테마 ──
-// 탁자는 다리만 늘려서 높이를 책상(DESK.height)과 같게 맞춤. 상대는 소파에 앉음
-// 이 테마들은 소파가 뒤 벽을 차지해서 방을 넓고 높게 하고, 책장은 오른쪽 벽으로 옮김
-interface FurnitureSet {
-  table: string;
-  tableScaleXZ?: number;         // 탁자가 너무 크면 가로·세로만 줄임
-  legs: [number, number];        // 늘릴 다리 구간 (바닥에서 m)
-  sofa: string;
-  lamp: string;                  // 탁자 위 왼쪽 뒤 구석에 놓는 조명
-  lampLightY: number;            // 불빛 높이 (탁자 윗면에서 칸 단위)
-  windowModel?: string;          // 없으면 코드로 만든 창문
-  floorLamp?: string;            // 바닥에 세우는 장식 (소파 오른쪽)
-}
-const FURNITURE: Record<string, FurnitureSet> = {
-  classic: {
-    table: 'classic/table.glb', legs: [0.02, 0.34],
-    sofa: 'classic/sofa.glb',
-    lamp: 'classic/lantern.glb', lampLightY: 2.8,
-  },
-  marble: {
-    table: 'marble/table.glb', tableScaleXZ: 0.6, legs: [0.06, 0.46],
-    sofa: 'marble/sofa.glb',
-    lamp: 'marble/candle.glb', lampLightY: 6.2,
-    windowModel: 'marble/window.glb',
-    floorLamp: 'marble/candelabra.glb',
-  },
-};
-
 // deskTop: 책상 윗면 높이 (= 판 밑면)
 // onLoaded: 가구 모델이 다 불러와지면 부름 (화면을 다시 그리게)
-export function buildRoom(themeId: string, deskTop: number, onLoaded?: () => void): THREE.Group {
+export function buildRoom(themeId: string, deskTop: number, onLoaded?: () => void): THREE.Group { // onLoaded는 스포트라이트 방만 씀 (모델을 불러옴)
   if (themeId === 'spotlight') return buildSpotlightRoom(deskTop, onLoaded);
-  const look = LOOKS[themeId] ?? LOOKS.classic;
-  const fur = FURNITURE[themeId];
+  const look = LOOKS[themeId] ?? LOOKS.minimal;
   const g = new THREE.Group();
   // 책상·스탠드처럼 가까이 보이는 것은 광택 계산이 있는 재질, 벽·바닥·책처럼 멀리 있는 것은 계산이 싼 재질
   // (방이 화면 대부분을 채워서, 싼 재질을 쓰면 휴대폰에서 훨씬 빠름)
@@ -99,12 +55,12 @@ export function buildRoom(themeId: string, deskTop: number, onLoaded?: () => voi
   };
 
   const floorY = deskTop - DESK.height;
-  const W = fur ? 60 : 46, D = 52, H = fur ? 50 : 34; // 방 너비, 깊이, 높이
+  const W = 46, D = 52, H = 34; // 방 너비, 깊이, 높이
   const zBack = -26, zFront = D + zBack;
   const ceilY = floorY + H;
 
-  // ── 책상: 윗판 + 다리 4개 (모델 가구 테마는 아래에서 탁자 모델로) ──
-  if (!fur) {
+  // ── 책상: 윗판 + 다리 4개 ──
+  {
     const deskMat = mat(look.desk, look.deskRough, { metalness: 0 });
     const top = box(DESK.width, DESK.thick, DESK.depth, deskMat, 0, deskTop - DESK.thick / 2, 0);
     top.receiveShadow = true;
@@ -154,8 +110,8 @@ export function buildRoom(themeId: string, deskTop: number, onLoaded?: () => voi
 
   // ── 창문 (왼쪽 벽): 스스로 빛나는 유리 + 창틀 + 들어오는 빛 ──
   const winW = 14, winH = 12, winY = deskTop + 8, winZ = -6;
-  if (!fur?.windowModel) g.add(windowGlass(winW, winH, look, -W / 2 + 0.05, winY, winZ));
-  if (!fur?.windowModel) {
+  g.add(windowGlass(winW, winH, look, -W / 2 + 0.05, winY, winZ));
+  {
     const frameMat = flat(look.wallLow);
     box(0.4, winH + 0.8, 0.5, frameMat, -W / 2 + 0.2, winY, winZ);               // 가운데 세로살
     box(0.4, 0.5, winW + 0.8, frameMat, -W / 2 + 0.2, winY, winZ);               // 가운데 가로살
@@ -168,11 +124,10 @@ export function buildRoom(themeId: string, deskTop: number, onLoaded?: () => voi
   windowLight.target.position.set(0, deskTop, 0);
   g.add(windowLight, windowLight.target);
 
-  // ── 책장: 보통은 뒤 벽(상대 뒤 오른쪽), 소파가 있는 테마는 오른쪽 벽 ──
+  // ── 책장: 뒤 벽 (상대 뒤 오른쪽) ──
   // 책장 자기 기준: 뒤판이 z=0, 앞(방 쪽)이 +z, 가운데가 x=0, 바닥이 y=floorY
   const shelf = new THREE.Group();
-  if (fur) { shelf.position.set(W / 2, 0, 4); shelf.rotation.y = -Math.PI / 2; }
-  else shelf.position.set(11, 0, zBack);
+  shelf.position.set(11, 0, zBack);
   g.add(shelf);
   const shelfMat = flat(look.shelf);
   const sbox = (w: number, h: number, d: number, m: THREE.Material, x: number, y: number, z: number) => {
@@ -204,7 +159,7 @@ export function buildRoom(themeId: string, deskTop: number, onLoaded?: () => voi
     }
   }
 
-  if (!fur) {
+  {
     // ── 스탠드 (책상 왼쪽 뒤 구석) + 따뜻한 불빛 ──
     const metal = mat(0x2a2622, 0.4, { metalness: 0.6 });
     const lx = -DESK.width / 2 + 2, lz = -DESK.depth / 2 + 2;
@@ -219,70 +174,9 @@ export function buildRoom(themeId: string, deskTop: number, onLoaded?: () => voi
     const bulb = new THREE.PointLight(look.lampColor, look.lampIntensity, 30, 1.6);
     bulb.position.set(lx, deskTop + 5.8, lz);
     g.add(bulb);
-  } else {
-    addFurniture(g, fur, look, deskTop, floorY, W, zBack, winY, winZ, onLoaded);
   }
 
   return g;
-}
-
-// 모델 가구 놓기: 탁자 → (탁자 크기를 보고) 소파 → 조명·창문. 불러오는 동안에도 불빛은 먼저 켜 둠
-function addFurniture(g: THREE.Group, fur: FurnitureSet, look: RoomLook, deskTop: number, floorY: number,
-  W: number, zBack: number, winY: number, winZ: number, onLoaded?: () => void) {
-  const lampX = -6, lampZ = -6; // 탁자 위 왼쪽 뒤 구석 (판 테두리 밖)
-  const bulb = new THREE.PointLight(look.lampColor, look.lampIntensity, 30, 1.6);
-  bulb.position.set(lampX, deskTop + fur.lampLightY, lampZ);
-  g.add(bulb);
-
-  const tableHeight = DESK.height / M; // 탁자 높이(m) = 책상 높이
-  const jobs: Promise<unknown>[] = [];
-
-  jobs.push(loadFurniture(fur.table, { cheap: true, // 화면 아래쪽을 넓게 덮어서 싼 재질로
-    scaleXZ: fur.tableScaleXZ,
-    stretch: { from: fur.legs[0], to: fur.legs[1], height: tableHeight },
-  }).then(async table => {
-    if (!table) return;
-    table.position.y = floorY;
-    g.add(table);
-    // 소파: 앞 끝이 탁자 뒤 끝 바로 뒤에 오게 (상대가 소파 앞쪽에 걸터앉은 자리)
-    const half = new THREE.Box3().setFromObject(table).max.z;
-    const sofa = await loadFurniture(fur.sofa);
-    if (!sofa) return;
-    const depth = new THREE.Box3().setFromObject(sofa).max.z * 2;
-    const front = -(half + 0.8);
-    sofa.position.set(0, floorY, Math.max(front - depth / 2, zBack + depth / 2 + 0.1));
-    g.add(sofa);
-  }));
-
-  jobs.push(loadFurniture(fur.lamp).then(lamp => {
-    if (!lamp) return;
-    lamp.position.set(lampX, deskTop, lampZ);
-    g.add(lamp);
-  }));
-
-  if (fur.windowModel) {
-    jobs.push(loadFurniture(fur.windowModel).then(win => {
-      if (!win) return;
-      // 모델 앞(+z)이 방 안(+x)을 보게 돌림. 뒤가 벽에 붙고, 창 가운데가 원래 창문 자리
-      win.rotation.y = Math.PI / 2;
-      const size = new THREE.Box3().setFromObject(win).getSize(new THREE.Vector3());
-      const bottom = Math.max(floorY + 0.55 * M, winY - size.y / 2);
-      win.position.set(-W / 2 + size.z / 2 + 0.05, bottom, winZ);
-      g.add(win);
-      // 창 뒤에 빛나는 하늘 (모델의 유리가 반투명이라 비쳐 보임)
-      g.add(windowGlass(size.x * 0.9, size.y * 0.95, look, -W / 2 + 0.02, bottom + size.y / 2, winZ));
-    }));
-  }
-
-  if (fur.floorLamp) {
-    jobs.push(loadFurniture(fur.floorLamp).then(fl => {
-      if (!fl) return;
-      fl.position.set(W / 2 - 8, floorY, zBack + 4);
-      g.add(fl);
-    }));
-  }
-
-  Promise.all(jobs).then(() => onLoaded?.());
 }
 
 // 스스로 빛나는 창밖 (왼쪽 벽에 붙는 판)
@@ -295,7 +189,7 @@ function windowGlass(w: number, h: number, look: RoomLook, x: number, y: number,
 }
 
 // ---------- 스포트라이트 방 ----------
-// 벽도 천장도 없는 깜깜한 공간. 바닥, 탁자(대리석 테마 것), 나무 의자만 있고
+// 벽도 천장도 없는 깜깜한 공간. 바닥, 대리석 탁자, 나무 의자만 있고
 // 상대 뒤쪽 높은 곳에서 스포트라이트 하나가 비스듬히 내리쬠 (무대 위 독백처럼)
 // 바닥에는 경계가 또렷한 빛의 원, 공중에는 연기 낀 빛기둥. 빛이 닿지 않는 곳은 완전한 검정
 const SPOT = {
@@ -444,10 +338,10 @@ function buildSpotlightRoom(deskTop: number, onLoaded?: () => void): THREE.Group
   glow.scale.set(9, 9, 1);
   glow.position.copy(apex);
   g.add(glow);
-  // 탁자(대리석 테마 것) → 의자. 의자는 탁자 뒤, 상대 자리에 판 쪽(+z)을 보게 (이 모델은 앞이 -z라서 180° 돌림)
+  // 대리석 탁자 → 의자. 의자는 탁자 뒤, 상대 자리에 판 쪽(+z)을 보게 (이 모델은 앞이 -z라서 180° 돌림)
   const tableHeight = DESK.height / M;
   const jobs: Promise<unknown>[] = [];
-  jobs.push(loadFurniture('marble/table.glb', {
+  jobs.push(loadFurniture('spotlight/table.glb', {
     scaleXZ: 0.6, stretch: { from: 0.06, to: 0.46, height: tableHeight }, shadows: true,
   }).then(table => {
     if (!table) return;

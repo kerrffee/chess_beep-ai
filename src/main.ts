@@ -35,7 +35,7 @@ function switchScreen(next: Screen) {
 const remember = (key: string, fallback: string) => { try { return localStorage.getItem(key) ?? fallback; } catch { return fallback; } };
 const keep = (key: string, value: string) => { try { localStorage.setItem(key, value); } catch { /* 저장 못 하면 그냥 넘어감 */ } };
 let use3D = remember('chess.view', '3d') === '3d'; // 처음 오면 3D
-let theme3D = remember('chess.theme', 'classic');
+let theme3D = remember('chess.theme', 'spotlight');
 const VIEW_LIST: { value: CameraView; label: string }[] = [
   { value: 'seat', label: '시점: 앉아서' },
   { value: 'angle', label: '시점: 비스듬히' },
@@ -49,12 +49,12 @@ let error3D = '';
 // 3D 대국 화면의 오른쪽 설정 판: 넓은 화면은 처음에 펼쳐 두고, 휴대폰은 접어 둠
 let panelOpen = window.innerWidth > 760;
 const THEME_LIST = [ // themes.ts의 THEMES와 같은 순서 (3D를 켜기 전에는 그 파일을 불러오지 않아서 따로 적음)
-  { value: 'classic', label: '테마: 클래식' },
-  { value: 'marble', label: '테마: 대리석' },
+  { value: 'spotlight', label: '테마: 스포트라이트' },
   { value: 'minimal', label: '테마: 미니멀' },
   { value: 'fantasy', label: '테마: 판타지' },
-  { value: 'spotlight', label: '테마: 스포트라이트' },
 ];
+// 예전에 고른 테마가 지금은 없으면(클래식·대리석은 지움) 기본 테마로
+if (!THEME_LIST.some(t => t.value === theme3D)) theme3D = THEME_LIST[0].value;
 // 체스 세트를 고를 수 있는 테마 (themes.ts의 pieceSets와 맞춤)
 const SET_THEMES = ['spotlight'];
 const PIECE_SET_LIST = [

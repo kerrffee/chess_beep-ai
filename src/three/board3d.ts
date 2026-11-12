@@ -14,7 +14,7 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { cloneGame, type GameState } from '../board';
 import { makeMove, type Move } from '../moves';
 import { makePiece, type PieceKind } from './pieces';
-import { CLASSIC, THEMES, withPieceSet, type Theme, type WoodLook } from './themes';
+import { THEMES, withPieceSet, type Theme, type WoodLook } from './themes';
 import { loadModelSet, type ModelSet } from './modelSet';
 import { buildRoom } from './room';
 import { createOpponent, type Opponent } from './opponent';
@@ -70,7 +70,7 @@ const MOVE_TIME = 320;
 const FALL_TIME = 700;    // 체크메이트 때 킹이 쓰러지는 시간    // 기물이 움직이는 시간(ms)
 const JUMP_HEIGHT = 0.6;  // 나이트가 뛰어오르는 높이
 
-export async function createBoard3D(onSquareClick: (index: number) => void, themeId = 'classic', pieceSetId = 'marble'): Promise<Board3D> {
+export async function createBoard3D(onSquareClick: (index: number) => void, themeId = 'spotlight', pieceSetId = 'marble'): Promise<Board3D> {
   const modelSet = await getModelSet();
   const touch = matchMedia('(pointer: coarse)').matches; // 휴대폰·태블릿이면 그림자 품질을 낮춤
 
@@ -113,7 +113,7 @@ export async function createBoard3D(onSquareClick: (index: number) => void, them
   // 테마에 따라 바뀌는 것들을 담는 묶음 (테마를 바꾸면 통째로 새로 만듦)
   let themeGroup = new THREE.Group();
   scene.add(themeGroup);
-  let theme: Theme = CLASSIC;
+  let theme: Theme = THEMES[0];
   let deskTop = -0.37;
   let whiteMat = new THREE.MeshPhysicalMaterial();
   let blackMat = new THREE.MeshPhysicalMaterial();
@@ -165,7 +165,7 @@ export async function createBoard3D(onSquareClick: (index: number) => void, them
   let room: THREE.Group | null = null;
   function applyTheme(id: string) {
     themeId = id;
-    theme = withPieceSet(THEMES.find(t => t.id === id) ?? CLASSIC, pieceSetId);
+    theme = withPieceSet(THEMES.find(t => t.id === id) ?? THEMES[0], pieceSetId);
     scene.remove(themeGroup);
     themeGroup = new THREE.Group();
     scene.add(themeGroup);
@@ -215,7 +215,7 @@ export async function createBoard3D(onSquareClick: (index: number) => void, them
     // 방: 판은 책상 위에 놓임 (책상 윗면 = 판 밑면)
     deskTop = boardBottom - 0.001;
     room = buildRoom(theme.id, deskTop, requestRender);
-    room.rotation.y = flipped ? Math.PI : 0; // 흑 쪽에서 보면 방도 돌려서, 늘 같은 방(창문 왼쪽, 소파는 상대 뒤)이 보이게
+    room.rotation.y = flipped ? Math.PI : 0; // 흑 쪽에서 보면 방도 돌려서, 늘 같은 방(창문 왼쪽, 의자는 상대 뒤)이 보이게
     themeGroup.add(room);
     if (opp) setOpponent(oppKey, true); // 책상 높이가 테마마다 조금 달라서 상대도 다시 앉힘
 

@@ -179,8 +179,8 @@ export let aiBook = false;   // AI가 지난 수를 오프닝 목록에서 뒀�
 
 export function makeWorker(): Worker {
   const w = new Worker(new URL('./ai-worker.ts', import.meta.url), { type: 'module' });
-  w.onmessage = (e: MessageEvent<{ id: number; move: Move; depth: number; score: number; book: boolean }>) =>
-    onAIReply(e.data.id, e.data.move, e.data.depth, e.data.score, e.data.book);
+  w.onmessage = (e: MessageEvent<{ id: number; move: Move; depth: number; score: number; book: boolean; queenDoomed: boolean }>) =>
+    onAIReply(e.data.id, e.data.move, e.data.depth, e.data.score, e.data.book, e.data.queenDoomed);
   // 일꾼 파일을 못 불러오면(열어 둔 사이에 새 버전이 배포됨) 새로고침해서 새 버전을 받음
   // (계산 중 오류는 메시지가 있고, 파일을 못 찾은 경우엔 메시지가 없음 → 그때만)
   w.onerror = e => { if (!e.message) reloadForNewVersion(); };
@@ -292,22 +292,23 @@ export function maybeAIMove() {
 }
 
 // 일꾼의 대답이 오면 둠. 다만 부탁한 지 최소 대기 시간이 안 됐으면 그때까지 기다림
-export function onAIReply(id: number, move: Move, depth: number, score: number, book: boolean) {
+export function onAIReply(id: number, move: Move, depth: number, score: number, book: boolean, queenDoomed = false) {
   if (id !== aiRequest) return; // 다시 시작·무르기 전에 한 부탁의 대답 → 버림
   aiBusy = false;
   const color = game.turn;
   const persona = findPersonality(aiFor(color)!);
-  // 생각해서 둔 수만 점수가 의미 있음 (랜덤·욕심쟁이·오프닝 목록 수는 점수 없음)
-  const thought = persona.kind === 'search' && !book;
+  // 오프닝 목록에서 꺼낸 수만 점수가 없음 (랜덤·욕심쟁이도 둔 뒤의 판을 살펴서 점수를 보내 줌)
+  const thought = !book;
   const delay = opponent === 'watch' ? WATCH_DELAY : AI_DELAY;
   const wait = Math.max(0, delay - (Date.now() - aiStart));
   aiTimer = setTimeout(() => {
     aiTimer = null;
     if (!isAITurn()) return;
     // 기권: 점수가 기준보다 나쁜 게 2수 연속이면, 두지 않고 포기
-    if (thought && persona.resignAt !== undefined) {
-      lowCount[color] = score < persona.resignAt ? lowCount[color] + 1 : 0;
-      if (lowCount[color] >= 2) {
+    if (thought && (persona.resignAt !== undefined || persona.resignOnQueenLoss)) {
+      if (persona.resignAt !== undefined) lowCount[color] = score < persona.resignAt ? lowCount[color] + 1 : 0;
+      // 점수 기준은 2수 연속, 퀸 사랑꾼의 "퀸이 먹힐 수밖에 없음"은 바로
+      if (lowCount[color] >= 2 || (persona.resignOnQueenLoss && queenDoomed)) {
         resigned = color;
         say('resign', aiFor(color));
         if (opponent === 'watch') commentary = `${colorName(color)} ${persona.name} 기권!`;

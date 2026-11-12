@@ -1,12 +1,12 @@
 // 3d.html: 3D 판 미리 보기 (테마·모델을 확인하는 용도, 둘 수는 없음)
 // 실제 게임의 3D 판은 board3d.ts에 있고, 대국 화면에서 "3D로 보기"를 누르면 나옴
-// 테마 고르기: 주소창으로 (예: 3d.html?theme=marble, 체스 세트: 3d.html?theme=spotlight&set=classic)
+// 테마 고르기: 주소창으로 (예: 3d.html?theme=minimal, 체스 세트: 3d.html?theme=spotlight&set=classic)
 import { initialGame } from '../board';
 import { inCheck } from '../moves';
 import { createBoard3D } from './board3d';
 
 const params = new URLSearchParams(location.search);
-const themeId = params.get('theme') ?? 'classic';
+const themeId = params.get('theme') ?? 'spotlight';
 const board = await createBoard3D(() => {}, themeId, params.get('set') ?? 'marble');
 board.element.style.width = '100vw';
 board.element.style.height = '100vh';

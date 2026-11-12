@@ -12,7 +12,7 @@ await p.addInitScript(() => {
   window.AudioContext = class extends C { createBufferSource() { window.__sounds++; return super.createBufferSource(); } };
 });
 await p.goto(URL);
-await p.evaluate(() => { localStorage.setItem('chess.view', '3d'); localStorage.setItem('chess.theme', 'classic'); localStorage.removeItem('chess.sound'); });
+await p.evaluate(() => { localStorage.setItem('chess.view', '3d'); localStorage.setItem('chess.theme', 'minimal'); localStorage.removeItem('chess.sound'); });
 await p.reload();
 await p.locator('select.opponent').nth(0).selectOption({ label: '사람 (둘이서)' });
 await p.waitForSelector('.board3d canvas', { timeout: 30000 });
@@ -93,8 +93,8 @@ const rows = await p2.$$eval('.move-row', r => r.map(x => x.textContent));
 ok(rows.length === 1 && rows[0].includes('e4'), '설정 판을 편 채로 판 누르기: ' + JSON.stringify(rows));
 errs.push(...errs2);
 
-// 5) 대가와 두면 판 건너편에 실루엣이 앉아 있음: 숨 쉬느라 가만히 있어도 조금씩 그림(초당 약 12장),
-//    대가가 수를 두면 손을 뻗음 (사진으로 확인)
+// 5) 대가와 두면 판 건너편에 가면 쓴 대가가 서 있음: 숨 쉬느라 가만히 있어도 조금씩 그림(초당 약 12장),
+//    대가가 수를 두면 구슬이 밝아지며 기물이 혼자 움직임 (사진으로 확인)
 const p3 = await (await b.newContext({ viewport: { width: 1000, height: 1000 } })).newPage();
 const errs3 = watchErrors(p3);
 await p3.goto(URL);
@@ -118,11 +118,11 @@ const q1 = await p3.evaluate(() => window.__chess3dRenders());
 await p3.waitForTimeout(2000);
 const q2 = await p3.evaluate(() => window.__chess3dRenders());
 // 느린 기기에서는 숨쉬기 장면을 드물게 그리니까(화면 없는 크롬이 그럼) "멈추지 않고 계속 그리는지"만 봄
-ok(q2 - q1 >= 1, `대가 실루엣이 숨 쉬는 동안 계속 그림: 2초에 ${q2 - q1}번`);
+ok(q2 - q1 >= 1, `대가가 숨 쉬는 동안 계속 그림: 2초에 ${q2 - q1}번`);
 await p3.click('.panel-toggle');
 await p3.waitForTimeout(1500);
 await p3.screenshot({ path: tmp('chess-room-master.png') });
-console.log('   사진 (방 + 대가 실루엣):', tmp('chess-room-master.png'));
+console.log('   사진 (방 + 대가):', tmp('chess-room-master.png'));
 errs.push(...errs3);
 
 await finish(b, errs);

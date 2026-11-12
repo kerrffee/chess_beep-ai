@@ -2,7 +2,7 @@
 // 성격 하나 = 설정 묶음 하나. 새 성격은 아래 PERSONALITIES에 하나 더 적기만 하면 메뉴에 생김
 // 성격은 "말"만이 아니라 "수를 고르는 방식"에서도 나와야 재밌음:
 //   기물 값(values), 평가 가중치(weights), 생각 시간(timeLimit), 실수 확률(mistakeChance),
-//   좋아하는 오프닝(openings), 기권 기준(resignAt), 상황별 대사(lines)
+//   좋아하는 오프닝(openings), 기권 기준(resignAt, resignOnQueenLoss), 상황별 대사(lines)
 import type { PieceType } from './board';
 import type { EvalWeights } from './ai';
 
@@ -34,6 +34,7 @@ export interface Personality {
   // 지금까지 둔 수가 어떤 줄의 앞부분과 같으면, 그 줄의 다음 수를 그대로 둠
   openings?: string[][];
   resignAt?: number;      // AI 입장 점수가 이보다 낮은 게 2수 연속이면 기권 (없으면 절대 기권 안 함)
+  resignOnQueenLoss?: boolean; // true면 "내 퀸이 먹힐 수밖에 없다"고 보는 순간 바로 기권 (퀸 사랑꾼용)
   lines?: Partial<Record<SpeechEvent, string[]>>; // 상황별 대사 (없거나 빈 목록이면 조용히)
 }
 
@@ -104,8 +105,9 @@ export const PERSONALITIES: Personality[] = [
   },
   {
     id: 'queenlover', name: '퀸 사랑꾼', kind: 'search', timeLimit: 700,
-    description: '퀸만은 절대 내줄 수 없다',
+    description: '퀸만은 절대 내줄 수 없다. 퀸을 못 지키게 되면 그 자리에서 기권',
     values: { q: 2500 },
+    resignOnQueenLoss: true,
     openings: [
       ['e2e4', 'e7e5', 'd1h5'],                          // 백: 퀸부터 출동
       ['e2e4', 'd7d5', 'e4d5', 'd8d5'],                  // 흑: 스칸디나비안 (퀸이 바로 나옴)
@@ -122,6 +124,7 @@ export const PERSONALITIES: Personality[] = [
       win: ['퀸 덕분이야. 사랑해, 퀸.'],
       lose: ['퀸, 미안해…'],
       draw: ['퀸이 무사했으니 됐어.'],
+      resign: ['퀸이 다치게 둘 수 없어.'],
     },
   },
   {

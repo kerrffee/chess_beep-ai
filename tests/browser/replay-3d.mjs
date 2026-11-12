@@ -5,7 +5,7 @@ const b = await launch({ webgl: true });
 const p = await (await b.newContext({ viewport: { width: 1000, height: 1000 } })).newPage();
 const errs = watchErrors(p);
 await p.goto(URL);
-await p.evaluate(() => { localStorage.setItem('chess.view', '3d'); localStorage.setItem('chess.theme', 'classic'); });
+await p.evaluate(() => { localStorage.setItem('chess.view', '3d'); localStorage.setItem('chess.theme', 'minimal'); });
 await p.reload();
 await p.waitForSelector('.board3d canvas', { timeout: 30000 });
 await p.locator('.tab', { hasText: '기보 보기' }).click();

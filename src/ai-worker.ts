@@ -6,14 +6,16 @@
 //    history = 지금까지 나온 장면들 (AI가 같은 장면 반복으로 무승부를 내지 않게)
 //    timeLimit = 성격에 생각 시간이 정해져 있지 않을 때 쓸 시간(ms)
 //    moveHistory = 처음부터 둔 수 목록 (오프닝 확인용. 처음 배치에서 시작한 게임이 아니면 없음)
-//    → { id, move, depth, score, book }
+//    → { id, move, depth, score, book, queenDoomed }
 //      depth = 끝까지 본 깊이, score = AI 입장 형세 점수(+면 AI 유리), book = 오프닝 목록에서 둔 수인지
+//      랜덤·욕심쟁이는 수를 고른 뒤 그 수를 둔 판을 잠깐 살펴서 score를 채움 (depth는 0)
+//      queenDoomed = 퀸 사랑꾼이 "퀸이 먹힐 수밖에 없다"고 봤는지 (기권 판단용)
 //
 // 2) 한 판 끝까지 둬 줘 (리그): { type: 'game', id, white, black, timeLimit }
 //    white, black = 성격 id. timeLimit = 생각하는 AI 모두의 한 수 시간(ms)
 //    → { type: 'gameResult', id, result, reason, ucis }
 //      result = '1-0' | '0-1' | '1/2-1/2', reason = 끝난 이유, ucis = 둔 수 목록
-import { chooseMove, stats, moveToUci } from './ai';
+import { chooseMove, stats, moveToUci, scoreAfterMove } from './ai';
 import { findPersonality } from './personality';
 import { initialGame, type GameState } from './board';
 import { gameStatus, makeMove, positionKey } from './moves';
@@ -54,6 +56,12 @@ self.onmessage = (e: MessageEvent) => {
     id: number; personalityId: string; game: GameState; history: string[]; timeLimit: number; moveHistory?: string[];
   };
   stats.depth = 0;
-  const move = chooseMove(findPersonality(personalityId), game, history, timeLimit, moveHistory);
-  self.postMessage({ id, move, depth: stats.depth, score: stats.score, book: stats.book });
+  const persona = findPersonality(personalityId);
+  const move = chooseMove(persona, game, history, timeLimit, moveHistory);
+  if (persona.kind !== 'search') {
+    const score = scoreAfterMove(game, move, history);
+    self.postMessage({ id, move, depth: 0, score, book: false, queenDoomed: false });
+    return;
+  }
+  self.postMessage({ id, move, depth: stats.depth, score: stats.score, book: stats.book, queenDoomed: stats.queenDoomed });
 };

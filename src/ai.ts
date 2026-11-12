@@ -420,7 +420,7 @@ function orderedMoves(game: GameState, ply = -1, ttMove = -1): Move[] {
 
 // 탐색한 장면 수, 마지막 탐색에서 끝까지 본 깊이,
 // 마지막으로 고른 수의 점수(AI 입장: +면 AI가 유리), 오프닝 목록에서 둔 수인지
-export const stats = { nodes: 0, depth: 0, score: 0, book: false };
+export const stats = { nodes: 0, depth: 0, score: 0, book: false, queenDoomed: false };
 
 // ---------- 시간 제한 ----------
 // 시간이 다 되면 TimeUp을 던져서 탐색을 한 번에 빠져나옴 (try/catch로 받음)
@@ -700,7 +700,9 @@ export function iterativeMove(original: GameState, timeLimit: number, history?: 
   } finally {
     deadline = Infinity; // 다음 탐색(테스트 등)에 시간 제한이 남지 않게
   }
-  stats.score = game.turn === 'w' ? result.best : -result.best; // AI 입장 점수로
+  // AI 입장 점수로. game(복사본)은 시간이 다 돼서 끊기면 두다 만 상태라 차례가 바뀌어 있을 수 있음
+  // → 원래 판(original)의 차례로 판단해야 부호가 안 뒤집힘
+  stats.score = original.turn === 'w' ? result.best : -result.best;
   return pickRandom(result.bestMoves);
 }
 
@@ -760,11 +762,66 @@ export function chooseMove(p: Personality, game: GameState, history?: string[], 
                            moveHistory?: string[]): Move {
   stats.book = false;
   stats.score = 0;
+  stats.queenDoomed = false;
   if (p.kind === 'random') return randomMove(game);
   if (p.kind === 'greedy') return greedyMove(game);
   const book = bookMove(p, game, moveHistory);
   if (book) { stats.book = true; stats.depth = 0; return book; }
   applyPersonality(p, game.turn); // 지금 차례인 쪽 = AI
   const best = iterativeMove(game, p.timeLimit ?? timeLimit, history);
+  if (p.resignOnQueenLoss) stats.queenDoomed = isQueenDoomed(game, best, stats.score);
   return maybeMistake(game, best, p, history);
+}
+
+// ---------- 퀸 사랑꾼의 기권 판단 ----------
+// 퀸 사랑꾼은 내 퀸을 2500점으로 봐서, 퀸을 지킬 길이 하나라도 있으면 다른 걸 다 버려서라도 지킴
+// "퀸이 먹힐 수밖에 없다" = 아래 두 가지가 다 맞을 때
+//  1) 탐색이 찾은 가장 좋은 점수가 "지금 판을 그대로 센 점수"보다 크게 낮음
+//     (퀸을 잃으면 2500, 퀸끼리 바꾸게 돼도 2500 − 900 = 1600점 떨어짐)
+//  2) 탐색이 예상한 진행(전치표에 남은 최선의 수들)을 따라가 보면, 실제로 내 퀸이 잡힘
+//     → 점수가 떨어진 이유가 퀸 때문인지 확인 (상대가 계속 체크해서 비기는 경우 등을 걸러 냄)
+const QUEEN_DOOM_DROP = 1400;
+const QUEEN_DOOM_LOOKAHEAD = 12; // 예상 진행을 몇 수(반수)까지 따라가 볼지
+
+function hasQueen(game: GameState, color: 'w' | 'b'): boolean {
+  return game.board.some(p => p !== null && p.color === color && p.type === 'q');
+}
+
+function isQueenDoomed(original: GameState, best: Move, aiScore: number): boolean {
+  const me = original.turn;
+  if (!hasQueen(original, me)) return false;   // 퀸이 이미 없음
+  if (Math.abs(aiScore) >= MATE) return false; // 메이트 싸움은 퀸 문제가 아님
+  const standing = me === 'w' ? evaluate(original) : -evaluate(original); // 지금 성격 값이 적용된 상태
+  if (standing - aiScore < QUEEN_DOOM_DROP) return false;
+
+  // 예상 진행 따라가기: 내가 고른 수 → 그다음부터는 전치표에 적힌 최선의 수
+  const game = cloneGame(original);
+  let move: Move | undefined = best;
+  for (let i = 0; i < QUEEN_DOOM_LOOKAHEAD && move; i++) {
+    const target = game.board[move.to];
+    if (target && target.color === me && target.type === 'q') return true; // 내 퀸이 잡힘
+    makeMove(game, move);
+    computeHash(game);
+    const slot = hashLo & TT_MASK;
+    if (ttFlag[slot] === 0 || ttHi[slot] !== hashHi || ttLo[slot] !== hashLo) break; // 기록 없음 → 여기까지
+    const code = ttMoveArr[slot];
+    move = legalMoves(game).find(m => encodeMove(m) === code);
+  }
+  return false;
+}
+
+// ---------- 랜덤·욕심쟁이의 형세 점수 ----------
+// 둘은 앞을 안 보고 두지만, 대사(형세 좋아짐/나빠짐/이기는 중/지는 중)와 그래프를 위해
+// 수를 둔 "뒤"의 판을 기본 평가로 잠깐(timeLimit) 살펴봄. 둘 수를 고르는 데는 전혀 안 씀
+// 돌려주는 값: 그 AI 입장 점수 (+면 그 AI 유리)
+export function scoreAfterMove(original: GameState, move: Move, history?: string[], timeLimit = 150): number {
+  const game = cloneGame(original);
+  const me = game.turn;
+  makeMove(game, move);
+  const moves = legalMoves(game);
+  if (moves.length === 0) return inCheck(game, game.turn) ? MATE : 0; // 이 수로 메이트 / 스테일메이트
+  applyPersonality(null, me);
+  const keys = history ? [...history, positionKey(game)] : undefined;
+  iterativeMove(game, timeLimit, keys); // stats.score = 상대(지금 차례) 입장 점수
+  return -stats.score;
 }

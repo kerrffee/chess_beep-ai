@@ -1,6 +1,6 @@
-// ---------- 방 가구 모델 (파일에서 불러오는 탁자, 소파, 조명, 창문) ----------
-// 모델 파일은 public/models/room/<테마>/ 에 있음 (원본을 웹용으로 줄인 .glb)
-// 출처: 탁자·소파·랜턴·촛대 = Poly Haven (CC0), 아치 창문 = Fab (Megascans)
+// ---------- 방 가구 모델 (파일에서 불러오는 탁자, 의자) ----------
+// 모델 파일은 public/models/room/<테마>/ 에 있음 (원본을 웹용으로 줄인 .glb). 지금은 스포트라이트 방만 씀
+// 출처: 대리석 탁자 = Poly Haven (CC0)
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
@@ -26,7 +26,6 @@ export interface FurnitureOptions {
   scaleXZ?: number;       // 가로·세로만 줄이거나 늘림 (높이는 그대로)
   // 다리 늘리기: 바닥에서 from~to(m) 사이만 늘려서 전체 높이를 height(m)로 맞춤. 윗판 모양은 그대로
   stretch?: { from: number; to: number; height: number };
-  cheap?: boolean;        // 화면을 넓게 덮는 것(탁자)은 광택 계산이 없는 싼 재질로 (휴대폰에서 빠름)
   shadows?: boolean;      // 그림자를 드리울지 (기본 false: 그림자 계산에서 빼야 휴대폰에서 빠름)
   height?: number;        // 전체 높이를 이 값(m)으로 맞춤 (모양 비율은 그대로). 단위가 m가 아닌 모델용
   rotateY?: number;       // 모델을 세로축으로 돌림(라디안). 앞이 +z가 아닌 모델용
@@ -66,9 +65,8 @@ export async function loadFurniture(path: string, opt: FurnitureOptions = {}): P
     pos.needsUpdate = true;
     geo.computeBoundingBox();
     geo.computeBoundingSphere();
-    const mesh = new THREE.Mesh(geo, fixMaterial(o.material as THREE.Material, opt.cheap ?? false));
-    const shadows = opt.shadows ?? false;
-    mesh.castShadow = shadows && !isFlame(mesh.material);
+    const mesh = new THREE.Mesh(geo, o.material as THREE.Material);
+    mesh.castShadow = opt.shadows ?? false;
     mesh.receiveShadow = true;
     g.add(mesh);
   });
@@ -77,30 +75,4 @@ export async function loadFurniture(path: string, opt: FurnitureOptions = {}): P
   const c = box.getCenter(new THREE.Vector3());
   for (const m of g.children) (m as THREE.Mesh).geometry.translate(-c.x, -box.min.y, -c.z);
   return g;
-}
-
-const isFlame = (m: THREE.Material) => /flame/i.test(m.name);
-
-// 촛불 불꽃은 빛을 받는 재질 대신 스스로 빛나는 재질로 (어두운 방에서도 밝게)
-// cheap이면 광택 계산이 없는 재질로 바꿈 (색 그림과 표면 굴곡은 그대로)
-function fixMaterial(m: THREE.Material, cheap: boolean): THREE.Material {
-  if (cheap && !isFlame(m) && m instanceof THREE.MeshStandardMaterial) {
-    return new THREE.MeshLambertMaterial({
-      name: m.name, map: m.map, color: m.color, normalMap: m.normalMap, normalScale: m.normalScale,
-      transparent: m.transparent, alphaTest: m.alphaTest, side: m.side,
-    });
-  }
-  if (isFlame(m) && m instanceof THREE.MeshStandardMaterial) {
-    return new THREE.MeshBasicMaterial({
-      name: m.name, map: m.map, color: 0xffd9a0,
-      // 불꽃 그림의 검은 바탕이 보이지 않게 더하기 방식으로 겹침 (검정 = 아무것도 안 더함)
-      transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
-    });
-  }
-  return m;
-}
-
-// 모델의 크기(칸 단위)
-export function sizeOf(obj: THREE.Object3D): THREE.Vector3 {
-  return new THREE.Box3().setFromObject(obj).getSize(new THREE.Vector3());
 }
