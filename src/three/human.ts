@@ -51,7 +51,7 @@ interface Style {
   rimColor: number;     // 등 뒤 윤곽 빛 색
   grip?: [number, number, number]; // 기물을 집을 때 손목 위치 (기물 기준, 칸). 없으면 (0, 2.1, -1.1)
   // 처음(서 있는) 자세에서 왼손 손바닥이 향하는 쪽 (캐릭터 기준, 오른손은 좌우 거울). 있으면 기물을 집을 때
-  // 손바닥이 기물 쪽(아래·몸 쪽)을 보도록 손목을 손끝 축으로 비틂. 없으면 손끝 방향만 맞춤
+  // 아래팔을 돌려 손바닥이 아래를 보게 하고 손목을 손바닥 쪽으로 굽힘. 없으면 손끝 방향만 맞춤
   palm?: [number, number, number];
 }
 const STYLES: Record<Who, Style> = {
@@ -89,20 +89,24 @@ const randomSlot = (t: number) => { const slot = Math.floor(t / RANDOM_SLOT); re
 // 살짝 지나쳤다가 돌아오는 움직임 (돌격대장이 기물을 밀어붙일 때)
 const overshoot = (k: number) => { const c = 1.9, u = k - 1; return k <= 0 ? 0 : k >= 1 ? 1 : 1 + (c + 1) * u * u * u + c * u * u; };
 
-// 기물을 집을 때 손바닥이 향할 쪽 (캐릭터 기준): 아래, 조금 몸 쪽
-const PALM_GRIP = new THREE.Vector3(0, -0.45, -1).normalize();
-// 손을 손끝 축(손 → mid) 둘레로 돌려서 손바닥(palmLocal, 손 뼈 기준)이 want(캐릭터 기준) 쪽을 보게. k = 얼마나(0~1)
-function twistPalm(r: Rig, hand: THREE.Bone, mid: THREE.Bone, palmLocal: THREE.Vector3, want: THREE.Vector3, k: number) {
-  const axis = bonePos(r, mid).sub(bonePos(r, hand)).normalize();
+// 기물을 집을 때 (palm이 있는 캐릭터): 아래팔을 제 축으로 돌려 손바닥이 아래를 보게 한 뒤, 손목은 손바닥 쪽으로만 굽힘
+// (손만 비틀면 손목이 손등 쪽으로 꺾여 보임 — 2026-11-12)
+const PALM_DOWN = new THREE.Vector3(0, -1, 0);
+const WRIST_FLEX = 1.0; // 손목을 손바닥 쪽으로 굽히는 각도(라디안, 약 57°)
+// 손바닥 방향(캐릭터 기준) = 손 뼈 기준 palmLocal을 지금 손 회전으로
+function palmDir(r: Rig, hand: THREE.Bone, palmLocal: THREE.Vector3): THREE.Vector3 {
   const rootQ = r.root.getWorldQuaternion(new THREE.Quaternion());
-  const handQ = rootQ.clone().invert().multiply(hand.getWorldQuaternion(new THREE.Quaternion())); // 캐릭터 기준 손 회전
-  const cur = palmLocal.clone().applyQuaternion(handQ);
-  const a = cur.addScaledVector(axis, -cur.dot(axis));
+  const handQ = rootQ.invert().multiply(hand.getWorldQuaternion(new THREE.Quaternion()));
+  return palmLocal.clone().applyQuaternion(handQ).normalize();
+}
+// 아래팔(lower → hand) 축 둘레로 돌려서 손바닥이 want 쪽을 보게. k = 얼마나(0~1)
+function rollForearm(r: Rig, lower: THREE.Bone, hand: THREE.Bone, palmLocal: THREE.Vector3, want: THREE.Vector3, k: number) {
+  const axis = bonePos(r, hand).sub(bonePos(r, lower)).normalize();
+  const a = palmDir(r, hand, palmLocal); a.addScaledVector(axis, -a.dot(axis));
   const b = want.clone().addScaledVector(axis, -want.dot(axis));
   if (a.lengthSq() < 1e-6 || b.lengthSq() < 1e-6) return;
   a.normalize(); b.normalize();
-  const angle = Math.atan2(new THREE.Vector3().crossVectors(a, b).dot(axis), a.dot(b));
-  turn(r, hand, axis, angle * k);
+  turn(r, lower, axis, Math.atan2(new THREE.Vector3().crossVectors(a, b).dot(axis), a.dot(b)) * k);
 }
 
 export function createHuman(who: Who, deskTop: number): Opponent {
@@ -485,6 +489,8 @@ export function createHuman(who: Who, deskTop: number): Opponent {
       if (!upper || !lower || !hand) continue;
       const target = s === 'r' ? rHand : handNow.l;
       reachIK(r, upper, lower, hand, target, new THREE.Vector3(side * 0.8, -0.6, -0.4).normalize());
+      const pl = s === 'r' && reachK > 0 ? palmLocal[s] : undefined;
+      if (pl) rollForearm(r, lower, hand, pl, PALM_DOWN, reachK);
       if (mid) {
         // 손바닥 방향: 기물을 집을 때는 아래, 얼굴을 가릴 때는 위, 평소엔 앞·아래
         const faceK = who === 'coward' ? Math.max(sm.lost, s === 'l' ? sm.check : 0) : 0;
@@ -520,11 +526,13 @@ export function createHuman(who: Who, deskTop: number): Opponent {
           if (s === 'l') dir.lerp(new THREE.Vector3(0, 1, 0.4), sm.check);
           dir.lerp(new THREE.Vector3(-side * 0.8, 0.2, 0.2), sm.lost);
         }
-        if (s === 'r' && reachK > 0) dir.lerp(who === 'bluffer' ? new THREE.Vector3(0, -0.45, 1) : who === 'coward' ? new THREE.Vector3(0, -0.6, 1) : new THREE.Vector3(0, -1, 0.45), reachK);
+        if (pl) {
+          // 손끝 = 아래팔 방향을 손바닥 쪽으로 WRIST_FLEX만큼 굽힌 방향 (손목이 늘 자연스러운 쪽으로만 꺾임)
+          const fa = bonePos(r, hand).sub(bonePos(r, lower)).normalize();
+          const pd = palmDir(r, hand, pl); pd.addScaledVector(fa, -pd.dot(fa)).normalize();
+          dir.lerp(fa.multiplyScalar(Math.cos(WRIST_FLEX)).addScaledVector(pd, Math.sin(WRIST_FLEX)), reachK);
+        } else if (s === 'r' && reachK > 0) dir.lerp(who === 'bluffer' ? new THREE.Vector3(0, -0.45, 1) : who === 'coward' ? new THREE.Vector3(0, -0.6, 1) : new THREE.Vector3(0, -1, 0.45), reachK);
         aim(r, hand, mid, dir);
-        // 기물을 집는 동안: 손바닥이 아래·몸 쪽을 보게 손끝 축으로 비틂 (안 하면 손등으로 집는 경우가 있음)
-        const pl = palmLocal[s];
-        if (pl && s === 'r' && reachK > 0) twistPalm(r, hand, mid, pl, PALM_GRIP, reachK);
       }
     }
     return busy;
