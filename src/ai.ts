@@ -825,3 +825,25 @@ export function scoreAfterMove(original: GameState, move: Move, history?: string
   iterativeMove(game, timeLimit, keys); // stats.score = 상대(지금 차례) 입장 점수
   return -stats.score;
 }
+
+// ---------- 복기용: 한 장면 살펴보기 ----------
+// 기본 성격(실수·취향 없음)으로 timeLimit 동안 생각해서, 이 장면의 형세(백 입장)와 가장 좋은 수를 돌려줌
+// 끝난 장면(메이트·스테일메이트)은 생각 없이 바로. 둘 수가 하나뿐이면 그 수를 둔 뒤 장면으로 점수를 매김
+// (iterativeMove는 수가 하나뿐이면 점수를 0으로 두고 바로 돌아와서, 지는 장면도 0이 되기 때문)
+export function analyzePosition(original: GameState, timeLimit: number, history?: string[]): { score: number; best: Move | null; depth: number } {
+  const moves = legalMoves(original);
+  if (moves.length === 0) {
+    const mated = inCheck(original, original.turn);
+    return { score: mated ? (original.turn === 'w' ? -MATE : MATE) : 0, best: null, depth: 0 };
+  }
+  if (moves.length === 1) {
+    const after = cloneGame(original);
+    makeMove(after, moves[0]);
+    const keys = history ? [...history, positionKey(after)] : undefined;
+    return { ...analyzePosition(after, timeLimit, keys), best: moves[0] };
+  }
+  applyPersonality(null, original.turn);
+  stats.depth = 0;
+  const best = iterativeMove(original, timeLimit, history);
+  return { score: original.turn === 'w' ? stats.score : -stats.score, best, depth: stats.depth };
+}

@@ -15,10 +15,11 @@ let timer: number | null = null;
 const AUTO_DELAY = 800; // 자동 재생 한 수 간격(ms)
 
 // atEnd: 마지막 장면부터 보여 주기 (방금 끝난 대국을 바로 열 때)
-export function openGame(g: LoadedGame, atEnd = false) {
+// at: 이 장면부터 (복기에서 실수한 수를 누르면 그 수를 둔 직후 장면)
+export function openGame(g: LoadedGame, atEnd = false, at?: number) {
   stopAuto();
   state.game = g;
-  state.index = atEnd ? g.moves.length : 0;
+  state.index = at !== undefined ? Math.max(0, Math.min(g.moves.length, at)) : atEnd ? g.moves.length : 0;
   state.error = '';
 }
 

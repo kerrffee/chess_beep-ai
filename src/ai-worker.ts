@@ -15,8 +15,11 @@
 //    white, black = 성격 id. timeLimit = 생각하는 AI 모두의 한 수 시간(ms)
 //    → { type: 'gameResult', id, result, reason, ucis }
 //      result = '1-0' | '0-1' | '1/2-1/2', reason = 끝난 이유, ucis = 둔 수 목록
+//
+// 3) 이 장면 살펴봐 줘 (복기): { type: 'analyze', id, game, history, timeLimit }
+//    → { type: 'analysis', id, score, best, depth }  score = 백 입장 형세, best = 가장 좋은 수(uci, 없으면 null)
 import './loadUserConfig'; // characters.jsonc의 수 두는 성향을 AI 일꾼에도 적용 (맨 먼저)
-import { chooseMove, stats, moveToUci, scoreAfterMove } from './ai';
+import { chooseMove, stats, moveToUci, scoreAfterMove, analyzePosition } from './ai';
 import { findPersonality } from './personality';
 import { initialGame, type GameState } from './board';
 import { gameStatus, makeMove, positionKey } from './moves';
@@ -48,6 +51,11 @@ function playWholeGame(whiteId: string, blackId: string, timeLimit: number) {
 
 self.onmessage = (e: MessageEvent) => {
   const data = e.data;
+  if (data.type === 'analyze') {
+    const r = analyzePosition(data.game as GameState, data.timeLimit, data.history);
+    self.postMessage({ type: 'analysis', id: data.id, score: r.score, best: r.best ? moveToUci(r.best) : null, depth: r.depth });
+    return;
+  }
   if (data.type === 'game') {
     const { result, reason, ucis } = playWholeGame(data.white, data.black, data.timeLimit);
     self.postMessage({ type: 'gameResult', id: data.id, result, reason, ucis });

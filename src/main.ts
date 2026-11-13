@@ -9,6 +9,7 @@ import { findPersonality } from './personality';
 import { squareName } from './notation';
 import * as G from './game'; // 게임 진행 담당 (판 상태, 수 두기, AI, 대사 …)
 import * as O from './online'; // 친구와 온라인 1대1 (연결)
+import * as R from './review'; // 대국 끝난 뒤 AI 복기
 import { CHARACTER_IDS } from './three/opponent';
 
 import { SYMBOLS, drawBoard, drawMoveList, makeButton, makeSelect, scrollMoves } from './view';
@@ -140,9 +141,9 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) stop
 // ---------- 친구와 온라인: 감정표현 ----------
 let emoteShown: { who: string; text: string; until: number } | null = null; // 지금 띄운 감정표현 말풍선
 let seenPeerEmote = 0; // 마지막으로 보여 준 친구 감정표현 번호
-function showEmote(who: string, text: string) {
-  emoteShown = { who, text, until: Date.now() + 3000 };
-  setTimeout(() => { if (emoteShown && Date.now() >= emoteShown.until) { emoteShown = null; render(); } }, 3050);
+function showEmote(who: string, text: string, ms = 3000) {
+  emoteShown = { who, text, until: Date.now() + ms };
+  setTimeout(() => { if (emoteShown && Date.now() >= emoteShown.until) { emoteShown = null; render(); } }, ms + 50);
 }
 function sendEmote(id: string) {
   const e = O.EMOTES.find(x => x.id === id)!;
@@ -167,7 +168,100 @@ function emoteBar(): HTMLElement {
     b.dataset.emote = e.id;
     bar.appendChild(b);
   }
+  // 채팅 열기 버튼 (안 읽은 글이 있으면 개수)
+  const unread = chatOpen ? 0 : O.chatReceived - chatSeen;
+  const chatBtn = makeButton(unread > 0 ? `💬 ${unread}` : '💬', toggleChat, false, 'emote-btn chat-btn' + (unread > 0 ? ' chat-unread' : ''));
+  chatBtn.title = '채팅';
+  bar.appendChild(chatBtn);
   return bar;
+}
+
+// ---------- 친구와 온라인: 채팅 ----------
+// 채팅 창은 한 번만 만들어 화면에 계속 붙여 둠 (화면 전체를 다시 그릴 때마다 새로 만들면
+// 치고 있던 글자가 지워지거나 한글 조합이 끊겨서). render()는 보이기·목록만 고침
+let chatOpen = false;
+let chatSeen = 0;      // 읽은 친구 글 수 (O.chatReceived와 비교해서 안 읽은 개수)
+let chatBubbled = 0;   // 말풍선으로 띄운 친구 글 수
+let chatDrawn = '';    // 목록을 마지막으로 그릴 때의 상태 (바뀌었을 때만 다시 그림)
+const chat = buildChat();
+function buildChat() {
+  const box = document.createElement('div');
+  box.className = 'chat-box';
+  box.hidden = true;
+  const head = document.createElement('div');
+  head.className = 'chat-head';
+  const title = document.createElement('span');
+  title.textContent = '채팅';
+  head.append(title, makeButton('✕', toggleChat, false, 'chat-close'));
+  const list = document.createElement('div');
+  list.className = 'chat-list';
+  const row = document.createElement('div');
+  row.className = 'chat-row';
+  const input = document.createElement('input');
+  input.className = 'chat-input';
+  input.maxLength = O.CHAT_MAX_LEN;
+  input.placeholder = '메시지 (Enter로 보내기)';
+  const sendNow = () => { if (O.sendChat(input.value)) input.value = ''; input.focus(); };
+  // 한글을 조합하는 중에 누른 Enter는 글자 확정용이라 보내지 않음 (안 그러면 마지막 글자가 따로 한 번 더 감)
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); sendNow(); }
+  });
+  const send = makeButton('보내기', sendNow, false, 'restart chat-send');
+  row.append(input, send);
+  box.append(head, list, row);
+  document.body.appendChild(box);
+  return { box, list, input, send };
+}
+function toggleChat() {
+  chatOpen = !chatOpen;
+  if (chatOpen && window.innerWidth <= 760) panelOpen = false; // 휴대폰: 설정 판과 겹치지 않게
+  render();
+  if (chatOpen) chat.input.focus();
+}
+// 대국 화면을 그릴 때마다: 채팅 창 보이기/숨기기, 새 글이면 목록 다시 그리기
+function syncChat(online: boolean) {
+  if (!online || O.status === 'idle') chatSeen = chatBubbled = O.chatReceived; // 방이 없으면 지난 글은 읽은 걸로
+  const show = online && chatOpen && O.status !== 'idle' && O.status !== 'error';
+  chat.box.hidden = !show;
+  if (!show) return;
+  chatSeen = chatBubbled = O.chatReceived;
+  const can = O.canPlay();
+  chat.input.disabled = !can;
+  chat.send.disabled = !can;
+  chat.input.placeholder = can ? '메시지 (Enter로 보내기)' : '연결되면 보낼 수 있어요';
+  const friend = O.peerChar ? `친구(${findPersonality(O.peerChar).name})` : '친구';
+  const drawn = `${O.chatLog.length}:${O.chatLog[O.chatLog.length - 1]?.at ?? 0}:${friend}`;
+  if (drawn === chatDrawn) return;
+  chatDrawn = drawn;
+  chat.list.innerHTML = '';
+  if (O.chatLog.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'chat-empty';
+    empty.textContent = '아직 메시지가 없어요';
+    chat.list.appendChild(empty);
+  }
+  for (const c of O.chatLog) {
+    const line = document.createElement('div');
+    line.className = 'chat-line ' + (c.mine ? 'chat-mine' : 'chat-theirs');
+    const who = document.createElement('span');
+    who.className = 'chat-who';
+    who.textContent = c.mine ? '나' : friend;
+    const text = document.createElement('span');
+    text.textContent = c.text; // 글자 그대로 (HTML로 해석하지 않음)
+    line.append(who, text);
+    chat.list.appendChild(line);
+  }
+  chat.list.scrollTop = chat.list.scrollHeight;
+}
+// 채팅 창이 닫혀 있을 때 친구 글이 오면 말풍선으로 잠깐
+function checkPeerChat() {
+  if (chatOpen || O.chatReceived === chatBubbled) return;
+  chatBubbled = O.chatReceived;
+  const last = [...O.chatLog].reverse().find(c => !c.mine);
+  if (!last) return;
+  const name = O.peerChar ? findPersonality(O.peerChar).name : '친구';
+  const text = last.text.length > 40 ? last.text.slice(0, 40) + '…' : last.text;
+  showEmote(`친구(${name})`, `💬 ${text}`, 4000);
 }
 
 function toggle3D() {
@@ -223,6 +317,7 @@ function openLeagueGame(g: LeagueGame) {
 function render() {
   const app = document.querySelector<HTMLDivElement>('#app')!;
   app.innerHTML = '';
+  if (screen !== 'play') syncChat(false); // 채팅 창은 대국 화면에서만
   // 3D 대국 화면이면 여백 없이 판이 화면 전체를 채움 (style.css의 body.full3d)
   document.body.classList.toggle('full3d', screen === 'play' && use3D);
 
@@ -319,6 +414,7 @@ function renderPlay(app: HTMLElement) {
   let bubble: HTMLElement | null = null;
   if (online) {
     checkPeerEmote();
+    checkPeerChat();
     if (emoteShown && Date.now() < emoteShown.until) {
       bubble = document.createElement('div');
       bubble.className = 'speech emote-speech';
@@ -349,7 +445,7 @@ function renderPlay(app: HTMLElement) {
     const aiColor: Color = G.playerColor === 'w' ? 'b' : 'w';
     const mate = gameStatus(G.game, G.history) === 'checkmate';
     // 온라인이면 친구가 고른 캐릭터가 친구 색 쪽에 앉음 (친구 수를 둘 때 손을 뻗고, 잡고 잡히면 반응)
-    const oppId = online ? (O.canPlay() || O.status === 'lost' ? O.peerChar : null)
+    const oppId = online ? (O.canPlay() || O.status === 'lost' || O.status === 'rejoining' ? O.peerChar : null)
       : watching || G.opponent === 'human' ? null : G.opponent;
     const opponent = oppId ? {
       id: oppId, color: aiColor,
@@ -377,8 +473,14 @@ function renderPlay(app: HTMLElement) {
   // 기보 + 형세 그래프
   const side = document.createElement('div');
   side.className = 'side';
-  side.appendChild(drawMoveList(G.moveTexts, G.firstTurn));
+  // 복기가 끝났으면 기보에 ??·?·?! 표시, 그래프는 복기 점수로
+  const reviewKey = R.keyFor(G.history[0], G.moveUcis);
+  if (R.review.status !== 'idle' && R.review.key !== reviewKey) R.stopReview(); // 다른 판이 됨 → 지난 복기는 버림
+  const reviewed = R.review.status === 'done';
+  const texts = reviewed ? G.moveTexts.map((t, i) => { const g = R.review.moves[i]?.grade; return g ? t + R.GRADES[g].mark : t; }) : G.moveTexts;
+  side.appendChild(drawMoveList(texts, G.firstTurn));
   side.appendChild(scoreGraph());
+  if (R.review.status !== 'idle') side.appendChild(reviewBox());
 
   // ③ 버튼들
   const buttons = document.createElement('div');
@@ -395,6 +497,13 @@ function renderPlay(app: HTMLElement) {
   } else {
     buttons.appendChild(makeButton('무르기', G.undo, G.snapshots.length === 0 && !G.resigned));
     buttons.appendChild(makeButton('다시 시작', G.restart));
+  }
+  // 대국이 끝나면 AI 복기 (구경할 때는 없음)
+  const gameOver = G.resigned !== null || gameStatus(G.game, G.history) !== 'playing';
+  if (gameOver && !watching && G.moveUcis.length >= 2 && R.review.status !== 'done') {
+    const running = R.review.status === 'running';
+    const label = running ? `AI 복기 중… ${Math.floor((R.review.done / Math.max(1, R.review.total)) * 100)}%` : 'AI 복기';
+    buttons.appendChild(makeButton(label, startReview, running, 'restart review-btn'));
   }
   buttons.appendChild(makeButton('기보 저장', downloadPGN, G.moveTexts.length === 0));
   buttons.appendChild(makeButton('기보 보기로 열기', openCurrentInReplay, G.moveTexts.length === 0));
@@ -484,6 +593,7 @@ function renderPlay(app: HTMLElement) {
   }
 
   if (G.pendingPromotion) app.appendChild(promotionPicker());
+  syncChat(online);
 
   scrollMoves(app); // 기보는 항상 마지막 수가 보이게
   soundForNewMoves();
@@ -520,8 +630,10 @@ function onlineLine(): HTMLElement {
   el.textContent = {
     idle: '⚙ 설정에서 방을 만들거나 코드로 들어가세요',
     creating: '방 만드는 중…',
+    reopening: `방 ${O.code}을 다시 여는 중…`,
     waiting: `방 코드 ${O.code} — 친구를 기다리는 중`,
     joining: '친구 방에 들어가는 중…',
+    rejoining: '연결이 끊겨서 다시 연결하는 중…',
     connected: `친구(${O.peerChar ? findPersonality(O.peerChar).name : '?'})와 연결됨 · 나: ${G.colorName(G.playerColor)}` + (O.peerRematch ? ' · 친구가 다시 하기를 원해요' : ''),
     lost: '친구와 연결이 끊겼어요',
     error: O.errorText,
@@ -582,11 +694,18 @@ function onlineBox(): HTMLElement {
     row(makeButton('취소', O.leaveAndRefresh));
   } else if (O.status === 'waiting') {
     linkRow();
-    line('이 링크를 친구에게 보내세요. 친구가 열면 바로 시작해요. (이 창을 닫거나 새로고침하면 방이 없어져요)', 'online-hint');
+    line('이 링크를 친구에게 보내세요. 친구가 열면 바로 시작해요. (새로고침은 괜찮지만, 이 탭을 닫으면 방이 없어져요)', 'online-hint');
+    row(makeButton('방 닫기', O.leaveAndRefresh));
+  } else if (O.status === 'reopening') {
+    line(`방 코드: ${O.code}`, 'online-code');
+    line('새로고침해서 같은 방을 다시 여는 중이에요. 친구는 자동으로 다시 들어와요.', 'online-hint');
     row(makeButton('방 닫기', O.leaveAndRefresh));
   } else if (O.status === 'joining') {
     line(`방 ${O.code}에 들어가는 중…`);
     row(makeButton('취소', O.leaveAndRefresh));
+  } else if (O.status === 'rejoining') {
+    line('연결이 끊겨서 다시 연결하는 중… (친구가 새로고침했으면 곧 이어져요)', 'online-hint');
+    row(makeButton('나가기', O.leaveAndRefresh));
   } else if (O.status === 'connected') {
     line(`친구와 연결됨 · 나: ${G.colorName(G.playerColor)}`, 'online-ok');
     if (O.peerRematch) line('친구가 다시 하기를 원해요 (누르면 색을 바꿔 새 판)', 'online-hint');
@@ -618,14 +737,20 @@ function scoreGraph(): HTMLElement {
   const wrap = document.createElement('div');
   wrap.className = 'graph';
   const W = 200, H = 70; // 그림 좌표 (실제 크기는 CSS로 늘어남)
-  const n = Math.max(G.scores.length, 20); // 수가 적어도 그래프가 한쪽에 몰리지 않게
+  // 복기가 끝났으면 복기 점수(수마다 다 있음), 아니면 AI가 둘 때 본 점수(사람 수는 비어 있음)
+  const reviewed = R.review.status === 'done';
+  const list: (number | null)[] = reviewed ? R.review.scores.slice(1) : G.scores;
+  const n = Math.max(list.length, 20); // 수가 적어도 그래프가 한쪽에 몰리지 않게
   const points: string[] = [];
-  G.scores.forEach((s, i) => {
+  const marks: string[] = [];
+  list.forEach((s, i) => {
     if (s === null) return;
     const v = Math.max(-GRAPH_CLAMP, Math.min(GRAPH_CLAMP, s));
     const x = ((i + 1) / n) * W;
     const y = H / 2 - (v / GRAPH_CLAMP) * (H / 2 - 4);
     points.push(`${x.toFixed(1)},${y.toFixed(1)}`);
+    const g = reviewed ? R.review.moves[i]?.grade : null;
+    if (g && g !== 'inaccuracy') marks.push(`<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="2.8" class="graph-${g}"></circle>`);
   });
   wrap.innerHTML = `
     <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
@@ -634,10 +759,76 @@ function scoreGraph(): HTMLElement {
       <line x1="0" y1="${H / 2}" x2="${W}" y2="${H / 2}" class="graph-mid"></line>
       ${points.length > 1 ? `<polyline points="${points.join(' ')}" class="graph-line"></polyline>` : ''}
       ${points.map(pt => { const [x, y] = pt.split(','); return `<circle cx="${x}" cy="${y}" r="1.6" class="graph-dot"></circle>`; }).join('')}
+      ${marks.join('')}
     </svg>
-    <div class="graph-label">형세 (위: 백 유리 · 아래: 흑 유리)</div>`;
+    <div class="graph-label">형세 (위: 백 유리 · 아래: 흑 유리)${reviewed ? ' · 빨강: 큰 실수, 주황: 실수' : ''}</div>`;
   return wrap;
 }
+
+// ---------- 대국 끝난 뒤 AI 복기 ----------
+function startReview() {
+  const start = G.snapshots[0]?.state ?? G.game; // 첫 수를 두기 전 장면
+  R.startReview(R.keyFor(G.history[0], G.moveUcis), start, G.moveUcis, G.moveTexts, G.history);
+}
+// 복기 결과: 색별 정확도·실수 개수 + 큰 실수·실수 목록 (누르면 기보 보기에서 그 장면)
+function reviewBox(): HTMLElement {
+  const box = document.createElement('div');
+  box.className = 'review-box';
+  if (R.review.status === 'running') {
+    box.textContent = `AI가 장면을 하나씩 살펴보는 중… (${R.review.done}/${R.review.total})`;
+    return box;
+  }
+  const name = (c: Color) => {
+    if (G.opponent === 'online') return c === G.playerColor ? '나' : '친구';
+    const id = G.aiFor(c);
+    return id ? findPersonality(id).name : G.opponent === 'human' ? G.colorName(c) : '나';
+  };
+  const title = document.createElement('div');
+  title.className = 'review-title';
+  title.textContent = 'AI 복기';
+  box.appendChild(title);
+  for (const c of ['w', 'b'] as Color[]) {
+    const mine = R.review.moves.filter(m => m.color === c);
+    const count = (g: R.Grade) => mine.filter(m => m.grade === g).length;
+    const acc = R.review.accuracy[c];
+    const line = document.createElement('div');
+    line.className = 'review-sum';
+    const who = G.opponent === 'human' ? G.colorName(c) : `${G.colorName(c)}(${name(c)})`;
+    line.textContent = `${who}: 정확도 ${acc === null ? '-' : Math.round(acc) + '%'} · `
+      + `큰 실수 ${count('blunder')} · 실수 ${count('mistake')} · 부정확 ${count('inaccuracy')}`;
+    box.appendChild(line);
+  }
+  const bad = R.review.moves.filter(m => m.grade === 'blunder' || m.grade === 'mistake');
+  if (bad.length === 0) {
+    const ok = document.createElement('div');
+    ok.className = 'review-hint';
+    ok.textContent = '큰 실수나 실수가 없었어요. 깔끔한 판!';
+    box.appendChild(ok);
+  }
+  for (const m of bad) {
+    const item = document.createElement('button');
+    item.className = 'review-item review-' + m.grade;
+    const num = Math.floor((m.ply + (G.firstTurn === 'b' ? 1 : 0)) / 2) + 1;
+    const moveName = `${num}${m.color === 'w' ? '.' : '...'} ${m.san}${R.GRADES[m.grade!].mark}`;
+    const better = m.bestSan ? ` · 더 좋은 수: ${m.bestSan}` : '';
+    item.textContent = `${moveName} ${R.GRADES[m.grade!].name} (${R.scoreText(m.before)} → ${R.scoreText(m.after)})${better}`;
+    item.title = '기보 보기에서 이 수를 둔 장면 열기';
+    item.addEventListener('click', () => openReviewAt(m.ply + 1));
+    box.appendChild(item);
+  }
+  const hint = document.createElement('div');
+  hint.className = 'review-hint';
+  hint.textContent = '형세: + 백 유리, − 흑 유리 (1.0 = 폰 하나). 목록을 누르면 기보 보기에서 그 장면이 열려요';
+  box.appendChild(hint);
+  return box;
+}
+function openReviewAt(index: number) {
+  const loaded = parsePGN(G.pgnText());
+  if (typeof loaded === 'string') return;
+  openGame(loaded, false, index);
+  switchScreen('replay');
+}
+R.onReviewChange(render);
 
 // 기보 저장: PGN(체스 기보 표준 형식) 파일로 내려받기. 다른 체스 사이트·앱이나 "기보 보기"에서 열 수 있음
 function downloadPGN() {
@@ -695,10 +886,14 @@ window.addEventListener('resize', () => { const wide = window.innerWidth > 760; 
 Object.assign(window, { __chess3dRenders: () => board3D?.renderCount() ?? 0 });
 // 초대 링크(…/?room=코드)로 들어왔으면 바로 친구 방에 들어감
 const roomFromLink = new URLSearchParams(location.search).get('room');
+const savedRoom = roomFromLink ? null : O.savedRoom(); // 방장이 새로고침했으면 그 방을 다시 엶
 if (roomFromLink) {
   panelOpen = true;
   G.setOpponent('online');
   O.join(roomFromLink);
+} else if (savedRoom) {
+  G.setOpponent('online');
+  O.resumeHost(savedRoom);
 }
 render();
 

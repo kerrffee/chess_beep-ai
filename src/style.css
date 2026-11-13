@@ -531,5 +531,97 @@ body.full3d .emote-bar {
   z-index: 2;
 }
 @media (max-width: 760px) {
-  body.full3d .emote-bar { left: auto; right: 10px; transform: none; }
+  /* 휴대폰: 왼쪽 아래 탭과 겹치지 않게 오른쪽 아래에 세로로 */
+  body.full3d .emote-bar { left: auto; right: 10px; transform: none; flex-direction: column; }
 }
+
+/* 친구와 온라인: 채팅 창 (왼쪽 아래에 떠 있음, 휴대폰은 아래 전체 너비) */
+.chat-box {
+  position: fixed;
+  left: 10px;
+  bottom: 10px;
+  z-index: 4;
+  width: 300px;
+  max-width: calc(100vw - 20px);
+  box-sizing: border-box;
+  padding: 8px;
+  border-radius: 10px;
+  background: rgba(30, 30, 30, 0.85);
+  backdrop-filter: blur(8px);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-family: sans-serif;
+  font-size: 13px;
+  color: #ddd;
+}
+.chat-box[hidden] { display: none; }
+.chat-head { display: flex; justify-content: space-between; align-items: center; font-weight: bold; }
+.chat-close { background: none; border: none; color: #ccc; font-size: 15px; cursor: pointer; padding: 2px 6px; }
+.chat-list {
+  height: 180px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.3);
+}
+.chat-line { max-width: 85%; padding: 4px 8px; border-radius: 8px; word-break: break-word; line-height: 1.35; }
+.chat-mine { align-self: flex-end; background: rgba(232, 198, 106, 0.25); }
+.chat-theirs { align-self: flex-start; background: rgba(255, 255, 255, 0.1); }
+.chat-who { display: block; font-size: 11px; color: #aaa; }
+.chat-empty { color: #888; text-align: center; margin: auto; }
+.chat-row { display: flex; gap: 6px; }
+.chat-send { font-size: 13px; padding: 6px 10px; }
+.chat-unread { background: rgba(200, 80, 60, 0.85); color: #fff; font-size: 15px; }
+@media (max-width: 760px) {
+  .chat-box { left: 10px; right: 10px; width: auto; bottom: 60px; }
+  body.full3d .chat-box { right: 64px; } /* 오른쪽 세로 감정표현 버튼을 가리지 않게 */
+  .chat-list { height: 20vh; }
+}
+
+/* 대국 끝난 뒤 AI 복기 */
+.graph-blunder { fill: #e0524a; }
+.graph-mistake { fill: #e89a3c; }
+.review-box {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.3);
+  font-family: sans-serif;
+  font-size: 12px;
+  color: #ddd;
+  text-align: left;
+}
+.review-title { font-weight: bold; font-size: 13px; color: #f4ead5; }
+.review-sum { color: #ccc; }
+.review-hint { color: #888; font-size: 11px; }
+.review-item {
+  text-align: left;
+  font-size: 12px;
+  padding: 4px 6px;
+  border: none;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #eee;
+  cursor: pointer;
+}
+.review-item:hover { background: rgba(255, 255, 255, 0.14); }
+.review-blunder { border-left: 3px solid #e0524a; }
+.review-mistake { border-left: 3px solid #e89a3c; }
+.side .review-box { flex: none; max-height: 45%; overflow-y: auto; }
+.chat-input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  font-size: 13px;
+  border-radius: 6px;
+  border: 1px solid #555;
+  background: rgba(0, 0, 0, 0.35);
+  color: #eee;
+}
+.panel .side .moves { min-height: 110px; }

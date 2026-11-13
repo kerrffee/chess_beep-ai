@@ -75,6 +75,37 @@ ok(await waitFor(guest, s => s.status === 'connected' && s.ucis.join() === 'e2e4
 ok((await state(guest)).myChar === 'chaos' && await waitFor(guest, s => s.peerChar === 'master', '재접속 캐릭터')
   && (await state(host)).peerChar === 'chaos', '새로고침해도 내 캐릭터(혼돈)는 기억, 친구 캐릭터(대가)도 다시 받음');
 
+// 채팅: 방장이 보내면 친구 화면에 말풍선 + 💬 버튼에 안 읽은 개수, 열면 목록에 보임
+await host.click('.chat-btn');
+ok(await host.locator('.chat-box').isVisible(), '방장: 💬 누르면 채팅 창이 열림');
+await host.fill('.chat-input', '안녕! <b>굵게?</b>');
+await host.press('.chat-input', 'Enter');
+ok(await waitFor(guest, s => s.chat.join() === '친구: 안녕! <b>굵게?</b>', '채팅 받기'), '친구가 채팅을 받음');
+ok((await host.inputValue('.chat-input')) === '' && (await host.locator('.chat-mine').textContent()).includes('안녕!'), '보낸 뒤 입력 칸이 비고 내 글이 목록에 보임');
+await guest.waitForTimeout(200);
+ok((await guest.locator('.emote-speech').textContent()).includes('💬 안녕!'), '친구 화면: 채팅 창이 닫혀 있으면 말풍선으로');
+ok((await guest.locator('.chat-btn').textContent()).includes('1'), '친구 화면 💬 버튼에 안 읽은 개수 1');
+await guest.click('.chat-btn');
+ok((await guest.locator('.chat-theirs').textContent()).includes('<b>굵게?</b>') && await guest.locator('.chat-theirs b').count() === 0,
+  '친구가 채팅 창을 열면 글이 보이고, HTML은 글자 그대로');
+ok(!(await guest.locator('.chat-btn').textContent()).includes('1'), '열면 안 읽은 개수가 사라짐');
+await guest.fill('.chat-input', '반가워');
+await guest.click('.chat-send');
+ok(await waitFor(host, s => s.chat.includes('친구: 반가워'), '답장'), '친구 답장이 방장 채팅 창에 옴');
+await host.locator('.chat-close').click();
+await guest.locator('.chat-close').click();
+await guest.waitForTimeout(4200); // 채팅 말풍선이 사라질 때까지
+
+// 방장 새로고침: 같은 코드로 방이 다시 열리고, 친구가 자동으로 다시 들어와 판·채팅이 그대로
+await host.reload();
+ok(await waitFor(host, s => s.code === code && (s.status === 'reopening' || s.status === 'waiting' || s.status === 'connected'), '방 다시 열기', 5000),
+  '방장 새로고침 → 같은 코드로 방을 다시 엶');
+ok(await waitFor(host, s => s.status === 'connected', '방장 재연결', 40000) && await waitFor(guest, s => s.status === 'connected', '친구 자동 재접속', 10000),
+  '친구가 자동으로 다시 들어와 연결됨');
+ok((await state(host)).ucis.join() === 'e2e4,e7e5' && (await state(guest)).ucis.join() === 'e2e4,e7e5', '판이 그대로 (e2e4, e7e5)');
+ok((await state(host)).chat.length === 2 && (await state(guest)).chat.length === 2, '채팅 기록도 양쪽 다 남아 있음');
+ok((await state(host)).myColor === 'w' && (await state(host)).peerChar === 'chaos', '방장 색(백)·친구 캐릭터도 그대로');
+
 // 감정표현: 버튼을 누르면 친구 화면에 말풍선, 너무 빨리 또 누르면 무시
 await host.click('.emote-btn[data-emote="nice"]');
 await guest.waitForTimeout(800);
@@ -104,12 +135,25 @@ await move(host, 'h5f7');
 await waitFor(guest, s => s.ucis.length === 7, '7');
 ok((await info(host)).includes('체크메이트') && (await info(guest)).includes('체크메이트'), '체크메이트가 양쪽에 똑같이 표시');
 
+// AI 복기: 끝난 판에서 누르면 장면마다 살펴보고, 결과에 친구의 큰 실수(Nf6??: Qxf7# 허용)가 나옴
+await guest.click('button:has-text("AI 복기")');
+const reviewEnd = Date.now() + 30000;
+while (Date.now() < reviewEnd && await guest.locator('.review-title').count() === 0) await guest.waitForTimeout(300);
+const reviewText = await guest.locator('.review-box').textContent().catch(() => '');
+console.log('   복기:', reviewText);
+ok(reviewText.includes('정확도') && /Nf6\?\?/.test(reviewText), '복기 결과에 정확도와 "Nf6??" 큰 실수');
+ok((await guest.locator('.moves').textContent()).includes('Nf6??'), '기보에도 Nf6?? 표시');
+await guest.locator('.review-item', { hasText: 'Nf6' }).click();
+ok(await guest.locator('.tab-on', { hasText: '기보 보기' }).count() === 1, '실수를 누르면 기보 보기 탭이 열림');
+await guest.click('.tab:has-text("대국")');
+
 // ⑥ 다시 하기: 둘 다 누르면 색을 바꿔 새 판
 await guest.click('button:has-text("다시 하기")');
 ok(await host.locator('text=친구가 원해요').count() > 0, '방장 화면에 "친구가 원해요"');
 await host.click('button:has-text("다시 하기")');
 ok(await waitFor(host, s => s.gameNo === 1 && s.ucis.length === 0, '새 판') && await waitFor(guest, s => s.gameNo === 1, '새 판(친구)'), '둘 다 눌러서 새 판');
 ok((await state(host)).myColor === 'b' && (await state(guest)).myColor === 'w', '새 판에서는 방장 흑, 친구 백');
+ok(await guest.locator('.review-box').count() === 0, '새 판이 되면 지난 복기는 사라짐');
 
 // ⑦ 기권 (두 번 눌러야 함)
 await move(guest, 'd2d4'); await waitFor(host, s => s.ucis.length === 1, 'd4');
