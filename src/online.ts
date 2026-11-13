@@ -10,7 +10,7 @@ import type Peer from 'peerjs';
 import type { DataConnection } from 'peerjs';
 import type { Color } from './board';
 import * as G from './game';
-import { TURN_CREDENTIALS_URL } from './turnConfig';
+import { TURN_CREDENTIALS_URL, TURN_SERVERS } from './turnConfig';
 
 export type OnlineStatus = 'idle' | 'creating' | 'waiting' | 'joining' | 'connected' | 'lost' | 'error';
 
@@ -78,8 +78,16 @@ async function peerOptions() {
 // TURN 서버 목록을 한 번만 받아 둠 (못 받으면 TURN 없이: 직접 연결만)
 let turnPromise: Promise<RTCIceServer[] | null> | null = null;
 export let turnState: 'off' | 'on' | 'failed' = 'off'; // 화면에 짧게 표시
+// 구글 STUN도 같이 (내 공개 주소 알아내기용, PeerJS 기본값에 있던 것)
+const GOOGLE_STUN: RTCIceServer = { urls: 'stun:stun.l.google.com:19302' };
+// 붙여 넣은 목록(TURN_SERVERS)이 있으면 그것 (없으면 null)
+function fixedServers(): RTCIceServer[] | null {
+  if (TURN_SERVERS.length === 0) return null;
+  turnState = 'on';
+  return [GOOGLE_STUN, ...TURN_SERVERS];
+}
 function turnServers(): Promise<RTCIceServer[] | null> {
-  if (!TURN_CREDENTIALS_URL) return Promise.resolve(null);
+  if (!TURN_CREDENTIALS_URL) return Promise.resolve(fixedServers());
   if (!turnPromise) {
     turnPromise = (async () => {
       try {
@@ -91,12 +99,13 @@ function turnServers(): Promise<RTCIceServer[] | null> {
         const list = await res.json() as RTCIceServer[];
         if (!Array.isArray(list) || list.length === 0) throw new Error('빈 목록');
         turnState = 'on';
-        // 구글 STUN도 같이 (내 공개 주소 알아내기용, PeerJS 기본값에 있던 것)
-        return [{ urls: 'stun:stun.l.google.com:19302' }, ...list];
+        return [GOOGLE_STUN, ...list];
       } catch (e) {
+        turnPromise = null; // 다음 연결 때 다시 시도
+        const fixed = fixedServers(); // 붙여 넣은 목록이 있으면 그걸로
+        if (fixed) return fixed;
         console.warn('TURN 서버 정보를 못 받아서 TURN 없이 연결해요:', e);
         turnState = 'failed';
-        turnPromise = null; // 다음 연결 때 다시 시도
         return null;
       }
     })();

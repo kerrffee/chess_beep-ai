@@ -2,11 +2,20 @@
 // 학교 와이파이·휴대폰 데이터처럼 두 브라우저가 직접 연결되지 못하는 곳에서는
 // TURN 서버가 수를 대신 전달해 줌 (그 경우에만 쓰이고, 직접 연결되면 안 씀)
 //
-// 쓰는 법 (무료, Metered):
-//   1. https://dashboard.metered.ca/signup 에서 가입 → 앱 이름을 정함 (예: chessbeep)
-//   2. 왼쪽 메뉴 "TURN Server" → "Add Credential"(또는 이미 있는 줄) → "Show API Key"
-//   3. 아래 따옴표 안에 이렇게 붙여 넣기 (앱 이름과 API 키를 바꿔서):
-//      https://앱이름.metered.live/api/v1/turn/credentials?apiKey=API키
-// 비워 두면 TURN 없이 지금처럼 연결함
-// (이 키는 브라우저에서 써도 되는 키라서 GitHub에 올라가도 괜찮지만, 다른 사람이 쓰면 무료 사용량이 줄 수 있음)
+// 방법 1 (지금 쓰는 것): Metered 대시보드 → TURN Server → Credentials → Get Credential → Show ICE Servers Array
+//   에서 나온 목록을 아래 TURN_SERVERS에 그대로 붙여 넣음 (앱: chess_beep, 라벨: chess)
+// 방법 2: 같은 화면의 Show API Key로 받은 주소를 TURN_CREDENTIALS_URL에
+//   https://앱이름.metered.live/api/v1/turn/credentials?apiKey=API키
+//   (둘 다 있으면 방법 2를 먼저 시도하고, 실패하면 방법 1)
+// 둘 다 비우면 TURN 없이 직접 연결만 함
+// 이 값은 GitHub에서 누구나 볼 수 있음 → 다른 사람이 쓰면 무료 사용량이 줄 수 있음.
+// 사용량이 이상하게 늘면 Metered에서 이 Credential을 지우고 새로 만들어 여기 바꿔 넣기
 export const TURN_CREDENTIALS_URL = '';
+
+export const TURN_SERVERS: RTCIceServer[] = [
+  { urls: 'stun:stun.relay.metered.ca:80' },
+  { urls: 'turn:global.relay.metered.ca:80', username: '945b544e68bbc6b7ccb836fa', credential: 'BEL5RGsQz7vPToCM' },
+  { urls: 'turn:global.relay.metered.ca:80?transport=tcp', username: '945b544e68bbc6b7ccb836fa', credential: 'BEL5RGsQz7vPToCM' },
+  { urls: 'turn:global.relay.metered.ca:443', username: '945b544e68bbc6b7ccb836fa', credential: 'BEL5RGsQz7vPToCM' },
+  { urls: 'turns:global.relay.metered.ca:443?transport=tcp', username: '945b544e68bbc6b7ccb836fa', credential: 'BEL5RGsQz7vPToCM' },
+];
