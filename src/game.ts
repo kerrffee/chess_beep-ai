@@ -74,6 +74,7 @@ export function aiFor(color: Color): string | null {
   if (opponent === 'watch') return watchAI[color];
   return color === playerColor ? null : opponent;
 }
+export const isOver = () => gameStatus(game, history) !== 'playing'; // 메이트·무승부로 끝났는지 (기권은 resigned)
 export const otherColor = (c: Color): Color => (c === 'w' ? 'b' : 'w');
 export const colorName = (c: Color) => (c === 'w' ? '백' : '흑');
 
@@ -81,7 +82,9 @@ export const colorName = (c: Color) => (c === 'w' ? '백' : '흑');
 export let speech: { text: string; by: string } | null = null; // 말풍선: 누가 무슨 말을
 export let lastScore: Record<Color, number | null> = { w: null, b: null }; // 각 AI가 지난번에 본 점수 (자기 입장)
 export let lowCount: Record<Color, number> = { w: 0, b: 0 };   // 기권 기준보다 나쁜 점수가 몇 번 연속인지
-export let resigned: Color | null = null; // 기권한 쪽 색 (없으면 null)
+export let resigned: Color | null = null; // 기권한 쪽 색 (없으면 null). 온라인 시간 초과도 여기 (endReason으로 구분)
+// 판이 어떻게 끝났는지 (resigned가 있을 때만 뜻이 있음): 기권 / 시간 초과 / 시간 초과지만 상대가 메이트할 기물이 없어 무승부
+export let endReason: 'resign' | 'timeout' | 'timeoutDraw' = 'resign';
 
 // 상황별로 말할 확률 (매 수마다 말하면 시끄러워서)
 export const SPEAK_CHANCE: Record<SpeechEvent, number> = {
@@ -248,6 +251,7 @@ export function resetSpeech() {
   lastScore = { w: null, b: null };
   lowCount = { w: 0, b: 0 };
   resigned = null;
+  endReason = 'resign';
 }
 
 // 무르기 (기권한 뒤에도 가능)
@@ -344,6 +348,11 @@ export function onAIReply(id: number, move: Move, depth: number, score: number, 
 }
 
 export function statusText(): string {
+  if (resigned && endReason !== 'resign') {
+    const who = resigned === playerColor ? '내' : '친구';
+    if (endReason === 'timeoutDraw') return `${who} 시간 초과 — 상대가 메이트할 기물이 없어 무승부`;
+    return `${who} 시간 초과! ${colorName(otherColor(resigned))} 승리`;
+  }
   if (resigned) {
     const id = aiFor(resigned);
     const who = id ? findPersonality(id).name : opponent === 'online' && resigned !== playerColor ? '친구' : '나';
@@ -381,6 +390,7 @@ export function onSquareClick(index: number) {
   if (pendingPromotion) return;                        // 고르는 중이면 판 클릭 무시
   if (aiFor(game.turn) !== null) return;               // AI 차례면 클릭 무시 (구경할 때는 항상)
   if (opponent === 'online' && (game.turn !== playerColor || !onlineHooks.canPlay())) return; // 친구 차례·연결 전
+  if (opponent === 'online' && !onlineHooks.clockOk()) { notify(); return; } // 내 시간이 다 됨 (시간 초과로 끝남)
 
   const piece = game.board[index];
 
@@ -425,6 +435,7 @@ export function togglePause() { paused = !paused; notify(); }
 // 프로모션 창에서 기물을 골랐을 때 / 취소했을 때
 export function choosePromotion(type: PieceType) {
   if (!pendingPromotion) return;
+  if (opponent === 'online' && (resigned || !onlineHooks.clockOk())) { pendingPromotion = null; notify(); return; } // 고르는 사이 시간 초과
   const m: Move = { from: pendingPromotion.from, to: pendingPromotion.to, promotion: type };
   const captured = capturedPiece(m) !== null;
   play(m);
@@ -443,7 +454,8 @@ export function cancelPromotion() {
 export function pgnText(): string {
   const status = gameStatus(game, history);
   let result = '*'; // 아직 진행 중
-  if (resigned) result = resigned === 'w' ? '0-1' : '1-0';
+  if (resigned && endReason === 'timeoutDraw') result = '1/2-1/2';
+  else if (resigned) result = resigned === 'w' ? '0-1' : '1-0';
   else if (status === 'checkmate') result = game.turn === 'w' ? '0-1' : '1-0';
   else if (status !== 'playing') result = '1/2-1/2';
   const nameOf = (c: Color) => {
@@ -462,6 +474,7 @@ greet(); // 처음 상대(대가)의 인사
 export const onlineHooks = {
   sendMoves: (_ucis: string[]) => {},
   canPlay: () => false,
+  clockOk: () => true, // 내 시간이 남았는지 (다 됐으면 online.ts가 시간 초과로 끝내고 false)
   leave: () => {},
 };
 export function onlineChanged() { notify(); }
@@ -477,7 +490,7 @@ export function startOnlineGame(color: Color) {
 // 보통은 끝에 한 수만 늘어나니 그것만 두고, 어긋났으면 처음부터 다시 둠
 export function applyRemoteMoves(ucis: string[]) {
   const same = moveUcis.length <= ucis.length && moveUcis.every((u, i) => u === ucis[i]);
-  if (!same) { const keep = resigned; resetBoard(); resigned = keep; }
+  if (!same) { const keep = resigned, why = endReason; resetBoard(); resigned = keep; endReason = why; }
   for (let i = moveUcis.length; i < ucis.length; i++) {
     const m = legalMoves(game).find(x => squareName(x.from) + squareName(x.to) + (x.promotion ?? '') === ucis[i]);
     if (!m) { console.warn('친구가 보낸 수가 이 판에서 둘 수 없는 수예요:', ucis[i]); break; }
@@ -487,4 +500,12 @@ export function applyRemoteMoves(ucis: string[]) {
   pendingPromotion = null;
 }
 
-export function setOnlineResigned(color: Color) { resigned = color; }
+export function setOnlineResigned(color: Color, why: 'resign' | 'timeout' | 'timeoutDraw' = 'resign') { resigned = color; endReason = why; }
+
+// 시간 초과 판정용: 이 색이 메이트할 기물을 갖고 있는지 (킹만, 킹+나이트, 킹+비숍이면 못 함)
+export function canMate(color: Color): boolean {
+  const mine = game.board.filter(p => p && p.color === color && p.type !== 'k');
+  if (mine.length === 0) return false;
+  if (mine.length === 1 && (mine[0]!.type === 'n' || mine[0]!.type === 'b')) return false;
+  return true;
+}

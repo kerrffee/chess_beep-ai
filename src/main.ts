@@ -370,6 +370,10 @@ function renderPlay(app: HTMLElement) {
         { value: 'b' as Color, label: '방 만들면 나: 흑' },
       ], hostColorChoice, v => { hostColorChoice = v; }));
     }
+    // 체스 시계: 방장이 방을 만들기 전·첫 수 전에만 고름 (친구는 방장이 고른 것을 따름)
+    if (O.canChangeTc() && O.role !== 'guest') {
+      controls.appendChild(makeSelect('opponent tc-select', O.TIME_CONTROLS.map(t => ({ value: t.value, label: '시간: ' + t.label })), O.tc, O.setTc));
+    }
   } else if (watching) {
     controls.appendChild(makeSelect('opponent', G.AI_LIST.map(o => ({ ...o, label: '백: ' + o.label })),
       G.watchAI.w, v => G.setWatchAI('w', v)));
@@ -561,6 +565,8 @@ function renderPlay(app: HTMLElement) {
     hud.className = 'hud';
     hud.append(info, depthInfo);
     if (online) hud.appendChild(onlineLine());
+    const clocks3D = online ? clockBar() : null;
+    if (clocks3D) hud.appendChild(clocks3D);
     if (bubble) hud.appendChild(bubble);
     app.appendChild(hud);
     if (online && O.canPlay()) app.appendChild(emoteBar());
@@ -582,6 +588,8 @@ function renderPlay(app: HTMLElement) {
     app.append(controls, personaInfo);
     if (online) app.appendChild(onlineBox());
     app.append(info, depthInfo);
+    const clocks2D = online ? clockBar() : null;
+    if (clocks2D) app.appendChild(clocks2D);
     if (bubble) app.appendChild(bubble);
     const middle = document.createElement('div');
     middle.className = 'middle';
@@ -622,6 +630,39 @@ function confirmResign(): boolean {
   setTimeout(render, 3000);
   return false;
 }
+
+// 체스 시계: 친구 · 나 남은 시간. 숫자는 0.1초마다 tickClocks가 고침 (화면 전체를 다시 그리지 않게)
+function clockBar(): HTMLElement | null {
+  if (!O.hasClock() || O.status === 'idle' || O.status === 'error' || O.status === 'creating') return null;
+  const bar = document.createElement('div');
+  bar.className = 'clock-bar';
+  const me = G.playerColor, them = G.otherColor(me);
+  for (const [c, who] of [[them, '친구'], [me, '나']] as [Color, string][]) {
+    const chip = document.createElement('div');
+    chip.className = 'clock-chip';
+    chip.dataset.color = c;
+    const name = document.createElement('span');
+    name.className = 'clock-who';
+    name.textContent = `${who}(${G.colorName(c)})`;
+    const time = document.createElement('span');
+    time.className = 'clock-time';
+    chip.append(name, time);
+    bar.appendChild(chip);
+  }
+  tickClocks(bar);
+  return bar;
+}
+function tickClocks(root: ParentNode = document) {
+  const running = O.clockTurn();
+  root.querySelectorAll<HTMLElement>('.clock-chip').forEach(chip => {
+    const c = chip.dataset.color as Color;
+    const ms = O.timeLeft(c);
+    chip.querySelector('.clock-time')!.textContent = O.clockText(ms);
+    chip.classList.toggle('clock-on', running === c);
+    chip.classList.toggle('clock-low', ms < 20_000);
+  });
+}
+setInterval(() => { if (G.opponent === 'online' && O.hasClock()) tickClocks(); }, 100);
 
 // 3D 화면 왼쪽 위에 짧게: 연결 상태
 function onlineLine(): HTMLElement {
@@ -674,6 +715,10 @@ function onlineBox(): HTMLElement {
   row(makeSelect('opponent', CHARACTER_IDS.map(id => ({ value: id, label: '내 캐릭터: ' + findPersonality(id).name })),
     O.myChar, O.setMyChar));
   if (O.peerChar && O.status !== 'idle') line(`친구 캐릭터: ${findPersonality(O.peerChar).name}`, 'online-hint');
+  if (O.status !== 'idle' && O.status !== 'error' && !(O.canChangeTc() && O.role === 'host')) {
+    const t = O.tcInfo();
+    line(t.base ? `시간: ${t.label}${t.inc ? ` (한 수 둘 때마다 ${t.inc / 1000}초 추가)` : ''}${O.role === 'guest' ? ' · 방장이 정함' : ''}` : '시간 제한 없음', 'online-hint');
+  }
   // TURN(turnConfig.ts)을 넣었을 때만: 잘 받았는지
   if (O.status !== 'idle' && O.turnState === 'on') line('TURN 켜짐: 학교 와이파이·휴대폰 데이터에서도 연결돼요', 'online-hint');
   if (O.turnState === 'failed') line('TURN 서버 정보를 못 받아서 직접 연결만 시도해요', 'online-error');

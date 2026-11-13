@@ -8,6 +8,7 @@
 // · 방장이 새로고침해도 방이 남음: 방 코드·지금 판·채팅을 이 탭(sessionStorage)에 기억해 뒀다가 같은 코드로 다시 엶.
 //   친구 쪽은 연결이 끊기면 2초마다 자동으로 다시 들어가 봄 (1분 동안)
 // · 채팅: 짧은 글을 주고받음 (최근 50개만 기억)
+// · 체스 시계: 방장이 시간을 고름. 수를 보낼 때 양쪽 남은 시간을 같이 보내서 두 화면을 맞춤
 // PeerJS는 용량이 있어서 온라인을 처음 쓸 때만 불러옴
 import type Peer from 'peerjs';
 import type { DataConnection } from 'peerjs';
@@ -37,13 +38,93 @@ let conn: DataConnection | null = null;
 // 주고받는 메시지
 type Msg =
   | { t: 'hi'; char: string } // 친구 → 방장: 지금 판 보내 줘 (+ 친구 캐릭터)
-  | { t: 'hello'; hostColor: Color; gameNo: number; ucis: string[]; resigned: Color | null; char: string } // 방장 → 친구: 지금 판 전부 (+ 방장 캐릭터)
+  | { t: 'hello'; hostColor: Color; gameNo: number; ucis: string[]; resigned: Color | null; char: string; why?: EndWhy; tc?: string; clock?: Clock } // 방장 → 친구: 지금 판 전부 (+ 방장 캐릭터, 시계)
   | { t: 'char'; char: string } // 캐릭터를 바꿈 (대국 중에도)
-  | { t: 'move'; gameNo: number; ucis: string[] }
+  | { t: 'move'; gameNo: number; ucis: string[]; clock?: Clock } // clock = 수를 둔 직후 양쪽 남은 시간
+  | { t: 'tc'; gameNo: number; tc: string }         // 방장이 시간 제한을 바꿈 (첫 수 전에만)
+  | { t: 'timeout'; gameNo: number; color: Color }  // 이 색의 시간이 다 됨
   | { t: 'resign'; gameNo: number; color: Color }
   | { t: 'rematch'; gameNo: number }
   | { t: 'emote'; id: string } // 감정표현 (EMOTES의 id)
   | { t: 'chat'; text: string }; // 채팅 한 줄
+
+// ---------- 체스 시계 ----------
+// 시간 제한: base = 처음 시간, inc = 한 수 둘 때마다 더해 주는 시간 (ms)
+export const TIME_CONTROLS: { value: string; label: string; base: number; inc: number }[] = [
+  { value: 'none', label: '시간 제한 없음', base: 0, inc: 0 },
+  { value: '1+0', label: '1분', base: 60_000, inc: 0 },
+  { value: '3+2', label: '3분 + 2초', base: 180_000, inc: 2000 },
+  { value: '5+3', label: '5분 + 3초', base: 300_000, inc: 3000 },
+  { value: '10+0', label: '10분', base: 600_000, inc: 0 },
+  { value: '15+10', label: '15분 + 10초', base: 900_000, inc: 10_000 },
+];
+type Clock = { w: number; b: number };
+type EndWhy = 'resign' | 'timeout' | 'timeoutDraw';
+// 상대가 응답이 없을 때(끊김 등) 내 화면이 상대 시간 초과를 판정하기까지 기다리는 여유
+// (보통은 시간이 다 된 쪽 화면이 먼저 알림. 상대 시계는 수가 오는 데 걸린 시간만큼 내 화면에서 조금 빨리 줄어서)
+const PEER_GRACE = 3000;
+export let tc = loadTc();           // 지금 판의 시간 제한 (방장이 정함, 친구는 받은 값)
+let left: Clock = { w: 0, b: 0 };   // 각자 남은 시간 (since 시각 기준)
+let since = 0;                      // 지금 차례인 쪽 시계가 가기 시작한 시각 (Date.now)
+export const tcInfo = () => TIME_CONTROLS.find(t => t.value === tc) ?? TIME_CONTROLS[0];
+export const hasClock = () => tcInfo().base > 0;
+const gameOver = () => G.resigned !== null || G.isOver();
+// 시계가 가는 중인지: 백이 첫 수를 둔 뒤부터, 판이 끝나기 전까지
+const clockRunning = () => hasClock() && G.moveUcis.length >= 1 && !gameOver();
+// 지금 남은 시간 (ms, 0보다 작을 수 있음)
+export function timeLeft(c: Color): number {
+  return clockRunning() && G.game.turn === c ? left[c] - (Date.now() - since) : left[c];
+}
+function resetClock() { const b = tcInfo().base; left = { w: b, b }; since = Date.now(); }
+// 지금 남은 시간을 left에 굳힘 (기권 등으로 판이 끝날 때, 저장·보내기 전에)
+function snapshot(): Clock { return { w: Math.max(0, timeLeft('w')), b: Math.max(0, timeLeft('b')) }; }
+function freeze() { left = snapshot(); since = Date.now(); }
+function loadTc(): string {
+  try { const v = localStorage.getItem('chess.timeControl'); if (v && TIME_CONTROLS.some(t => t.value === v)) return v; } catch { /* 없음 */ }
+  return '5+3';
+}
+// 방장: 시간 제한 바꾸기 (방을 만들기 전, 또는 첫 수 전에만)
+export const canChangeTc = () => role === null || status === 'idle' || status === 'error' || (role === 'host' && G.moveUcis.length === 0 && !gameOver());
+export function setTc(v: string) {
+  if (!canChangeTc() || !TIME_CONTROLS.some(t => t.value === v)) return;
+  tc = v;
+  try { localStorage.setItem('chess.timeControl', v); } catch { /* 이번만 */ }
+  resetClock();
+  if (role === 'host') send({ t: 'tc', gameNo, tc });
+  changed();
+}
+// 시간 초과: 이 색이 짐 (이긴 쪽이 메이트할 기물이 없으면 무승부)
+function flag(c: Color, tell: boolean) {
+  if (gameOver()) return;
+  freeze();
+  left[c] = 0;
+  G.setOnlineResigned(c, G.canMate(G.otherColor(c)) ? 'timeout' : 'timeoutDraw');
+  if (tell) send({ t: 'timeout', gameNo, color: c });
+  changed();
+}
+// 0.2초마다: 내 시간이 다 됐으면 내가 알림, 친구 시간이 (여유까지) 다 됐는데 소식이 없으면 내가 판정
+setInterval(() => {
+  if (role === null || !clockRunning()) return;
+  const me = myColor(), them = G.otherColor(me);
+  if (timeLeft(me) <= 0) flag(me, true);
+  else if (timeLeft(them) <= -PEER_GRACE) flag(them, true);
+}, 200);
+// 내가 수를 두기 직전 (game.ts가 부름): 시간이 남았으면 true, 다 됐으면 시간 초과로 끝내고 false
+function clockOk(): boolean {
+  if (!clockRunning() || G.game.turn !== myColor()) return true;
+  if (timeLeft(myColor()) > 0) return true;
+  flag(myColor(), true);
+  return false;
+}
+// 남은 시간 글자: 1:05, 10초 아래는 0:09.4
+export function clockText(ms: number): string {
+  const t = Math.max(0, ms);
+  if (t < 10_000) return `0:0${(Math.floor(t / 100) / 10).toFixed(1)}`;
+  const sec = Math.ceil(t / 1000);
+  return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
+}
+// 화면용: 시계가 가는 쪽
+export const clockTurn = (): Color | null => (clockRunning() ? G.game.turn : null);
 
 // ---------- 채팅 ----------
 export type ChatLine = { mine: boolean; text: string; at: number };
@@ -144,10 +225,10 @@ function changed() { saveRoom(); G.onlineChanged(); }
 // ---------- 방장 새로고침 대비: 방 기억하기 ----------
 // sessionStorage = 이 탭에서만, 새로고침해도 남고 탭을 닫으면 사라짐 (다른 탭에서 방장 둘이 되지 않게)
 const ROOM_KEY = 'chess.hostRoom';
-export type SavedRoom = { code: string; hostColor: Color; gameNo: number; ucis: string[]; resigned: Color | null; chat: ChatLine[]; at: number };
+export type SavedRoom = { code: string; hostColor: Color; gameNo: number; ucis: string[]; resigned: Color | null; why?: EndWhy; chat: ChatLine[]; tc?: string; clock?: Clock; at: number };
 function saveRoom() {
   if (role !== 'host' || !code || !['reopening', 'waiting', 'connected', 'lost'].includes(status)) return;
-  const room: SavedRoom = { code, hostColor, gameNo, ucis: [...G.moveUcis], resigned: G.resigned, chat: chatLog, at: Date.now() };
+  const room: SavedRoom = { code, hostColor, gameNo, ucis: [...G.moveUcis], resigned: G.resigned, why: G.endReason, chat: chatLog, tc, clock: snapshot(), at: Date.now() };
   try { sessionStorage.setItem(ROOM_KEY, JSON.stringify(room)); } catch { /* 저장 못 하면 새로고침 때 방이 사라질 뿐 */ }
 }
 function forgetRoom() {
@@ -195,6 +276,7 @@ export async function host(color: Color) {
   hostColor = color;
   gameNo = 0;
   G.startOnlineGame(hostColor);
+  resetClock();
   changed();
   for (let tries = 0; tries < 4; tries++) {
     const tryCode = randomCode();
@@ -232,7 +314,11 @@ export async function resumeHost(saved: SavedRoom) {
   chatLog = Array.isArray(saved.chat) ? saved.chat.slice(-CHAT_KEEP) : [];
   G.startOnlineGame(hostColor);
   G.applyRemoteMoves(saved.ucis);
-  if (saved.resigned) G.setOnlineResigned(saved.resigned);
+  if (saved.resigned) G.setOnlineResigned(saved.resigned, saved.why);
+  // 시계: 저장한 때의 남은 시간에서, 새로고침하는 동안 흐른 시간만큼 지금 차례 쪽이 줄어든 채로
+  if (saved.tc && TIME_CONTROLS.some(t => t.value === saved.tc)) tc = saved.tc;
+  resetClock();
+  if (saved.clock) { left = { ...saved.clock }; since = saved.at; }
   status = 'reopening';
   changed();
   for (let tries = 0; tries < 15; tries++) {
@@ -365,6 +451,7 @@ export function leave() {
   code = '';
   errorText = '';
   myRematch = peerRematch = false;
+  tc = loadTc(); // 친구 방에서 받은 시간 제한 대신 내가 고른 것으로
 }
 
 function send(m: Msg) {
@@ -393,7 +480,7 @@ export const myColor = (): Color => (role === 'guest' ? G.otherColor(hostColor) 
 export const canPlay = () => status === 'connected';
 
 function sendHello() {
-  send({ t: 'hello', hostColor, gameNo, ucis: G.moveUcis, resigned: G.resigned, char: myChar });
+  send({ t: 'hello', hostColor, gameNo, ucis: G.moveUcis, resigned: G.resigned, why: G.endReason, char: myChar, tc, clock: snapshot() });
 }
 
 // ---------- 받기 ----------
@@ -421,22 +508,44 @@ function receive(m: Msg) {
     myRematch = peerRematch = false;
     G.startOnlineGame(myColor());
     G.applyRemoteMoves(m.ucis);
-    if (m.resigned) G.setOnlineResigned(m.resigned);
+    if (m.resigned) G.setOnlineResigned(m.resigned, m.why);
+    if (m.tc && TIME_CONTROLS.some(t => t.value === m.tc)) tc = m.tc;
+    resetClock();
+    if (m.clock) left = { ...m.clock }; // since = 지금 (받은 때부터 다시 감)
     changed();
     return;
   }
   if (m.gameNo !== gameNo) return; // 지난 판의 메시지
-  if (m.t === 'move') G.applyRemoteMoves(m.ucis);
-  else if (m.t === 'resign') G.setOnlineResigned(m.color);
+  if (m.t === 'move') {
+    G.applyRemoteMoves(m.ucis);
+    if (m.clock && !gameOver()) { left = { ...m.clock }; since = Date.now(); } // 받은 때부터 내 시계가 감
+    else if (m.clock) left = { ...m.clock };
+  } else if (m.t === 'tc') {
+    if (TIME_CONTROLS.some(t => t.value === m.tc) && G.moveUcis.length === 0) { tc = m.tc; resetClock(); }
+  } else if (m.t === 'timeout') flag(m.color, false);
+  else if (m.t === 'resign') { freeze(); G.setOnlineResigned(m.color); }
   else if (m.t === 'rematch') { peerRematch = true; maybeRematch(); }
   changed();
 }
 
 // ---------- 보내기 (game.ts·main.ts가 부름) ----------
-export function sendMoves(ucis: string[]) { send({ t: 'move', gameNo, ucis: [...ucis] }); saveRoom(); }
+// 내가 수를 둔 직후: 내 시계에서 생각한 시간을 빼고 추가 시간을 더한 뒤, 양쪽 시간을 같이 보냄
+// (백의 첫 수는 시계가 아직 안 가니 그대로)
+export function sendMoves(ucis: string[]) {
+  let clock: Clock | undefined;
+  if (hasClock()) {
+    const mover = G.otherColor(G.game.turn);
+    if (ucis.length >= 2) left[mover] = Math.max(0, left[mover] - (Date.now() - since)) + tcInfo().inc;
+    since = Date.now();
+    clock = { ...left };
+  }
+  send({ t: 'move', gameNo, ucis: [...ucis], clock });
+  saveRoom();
+}
 
 export function resign() {
   if (!canPlay() || G.resigned) return;
+  freeze();
   G.setOnlineResigned(myColor());
   send({ t: 'resign', gameNo, color: myColor() });
   changed();
@@ -464,12 +573,16 @@ function maybeRematch() {
   gameNo++;
   hostColor = G.otherColor(hostColor);
   G.startOnlineGame(myColor());
+  resetClock();
 }
 
 // game.ts가 부를 수 있게 함수를 넣어 줌
 G.onlineHooks.sendMoves = sendMoves;
 G.onlineHooks.canPlay = canPlay;
+G.onlineHooks.clockOk = clockOk;
 G.onlineHooks.leave = () => { leave(); changed(); };
 
 // 테스트용 (브라우저 테스트가 상태를 읽음)
-Object.assign(window, { __online: () => ({ status, role, code, gameNo, myColor: myColor(), ucis: [...G.moveUcis], resigned: G.resigned, myChar, peerChar, chat: chatLog.map(c => (c.mine ? '나: ' : '친구: ') + c.text) }) });
+Object.assign(window, { __online: () => ({ status, role, code, gameNo, myColor: myColor(), ucis: [...G.moveUcis], resigned: G.resigned, why: G.endReason, tc, clock: snapshot(), myChar, peerChar, chat: chatLog.map(c => (c.mine ? '나: ' : '친구: ') + c.text) }),
+  // 시계 테스트: 남은 시간을 직접 정함 (진짜 시간 제한을 기다리지 않으려고)
+  __setClock: (w: number, b: number) => { left = { w, b }; since = Date.now(); changed(); } });

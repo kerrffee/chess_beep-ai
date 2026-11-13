@@ -625,3 +625,17 @@ body.full3d .emote-bar {
   color: #eee;
 }
 .panel .side .moves { min-height: 110px; }
+
+/* 체스 시계 (친구와 온라인): 친구 · 나. 지금 가는 쪽은 밝게, 20초 아래는 빨갛게 */
+.clock-bar { display: flex; gap: 8px; justify-content: center; margin: 4px 0; }
+.hud .clock-bar { justify-content: flex-start; margin: 0; }
+.clock-chip {
+  display: flex; align-items: baseline; gap: 6px;
+  padding: 4px 10px; border-radius: 8px;
+  background: rgba(20, 20, 24, 0.75); border: 1px solid #444; color: #999;
+}
+.clock-who { font-size: 12px; }
+.clock-time { font-size: 20px; font-variant-numeric: tabular-nums; font-weight: 600; min-width: 3.2em; text-align: right; }
+.clock-on { color: #fff; border-color: #c9a227; background: rgba(60, 50, 20, 0.85); }
+.clock-low .clock-time { color: #ff6b5b; }
+.clock-low.clock-on { border-color: #ff6b5b; }

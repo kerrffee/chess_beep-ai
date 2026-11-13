@@ -163,7 +163,37 @@ await host.click('button:has-text("기권")');
 ok(await waitFor(guest, s => s.resigned === 'b', '기권 받기'), '방장 기권 → 친구 화면에도 기권');
 ok((await info(guest)).includes('친구 기권'), `친구 화면: "${await info(guest)}"`);
 
-// ⑧ 없는 방 코드
+// ⑧ 체스 시계: 새 판에서 방장이 시간을 고르고, 수마다 시간이 맞춰지고, 0이 되면 시간 패배
+await guest.click('button:has-text("다시 하기")');
+await host.click('button:has-text("다시 하기")');
+ok(await waitFor(host, s => s.gameNo === 2 && s.myColor === 'w', '셋째 판') && await waitFor(guest, s => s.gameNo === 2, '셋째 판(친구)'), '셋째 판: 방장 백');
+const clockTexts = async p => (await p.locator('.clock-bar').textContent()).replace(/\s+/g, '');
+ok((await clockTexts(host)).includes('5:00') && (await clockTexts(guest)).includes('5:00'), `처음 시간 5분이 양쪽에: "${await clockTexts(guest)}"`);
+ok(await guest.locator('.tc-select').count() === 0 && (await guest.locator('.online-box').textContent()).includes('방장이 정함'), '친구는 시간을 못 고르고 "방장이 정함"');
+await host.locator('.tc-select').selectOption({ label: '시간: 3분 + 2초' });
+ok(await waitFor(guest, s => s.tc === '3+2', '시간 바꾸기'), '방장이 3분+2초로 바꾸면 친구도 3+2');
+await guest.waitForTimeout(1200);
+ok((await state(host)).clock.w === 180000, '백 첫 수 전에는 시계가 안 감');
+await move(host, 'e2e4'); await waitFor(guest, s => s.ucis.length === 1, 'c1');
+ok(await host.locator('.tc-select').count() === 0, '첫 수를 두면 시간을 못 바꿈');
+await guest.waitForTimeout(1500);
+await move(guest, 'e7e5');
+ok(await waitFor(host, s => s.ucis.length === 2, 'c2'), '친구 수 받음');
+const hb = (await state(host)).clock.b, gb = (await state(guest)).clock.b;
+console.log('   흑 남은 시간 (방장 화면, 친구 화면):', hb, gb);
+ok(hb > 179000 && hb < 181000 && Math.abs(hb - gb) < 300, '흑: 1.5초 쓰고 2초 받음 → 약 3:00.5, 두 화면이 같음');
+// 방장(백) 시간을 1.5초로 줄이고 기다림 → 방장 화면이 시간 초과를 알리고 친구 화면에도
+await host.evaluate(() => window.__setClock(1500, 180000));
+ok(await waitFor(guest, s => s.resigned === 'w' && s.why === 'timeout', '시간 초과 받기', 6000), '방장 시간이 0 → 친구 화면에도 백 시간 패배');
+ok((await info(host)).includes('내 시간 초과') && (await info(guest)).includes('친구 시간 초과! 흑 승리'), `표시: "${await info(host)}" / "${await info(guest)}"`);
+ok((await state(host)).clock.w === 0, '방장 시계 0:00');
+const left0 = (await state(guest)).clock.b;
+await guest.waitForTimeout(600);
+ok((await state(guest)).clock.b === left0, '판이 끝나면 시계가 멈춤');
+await move(host, 'g1f3');
+ok((await state(host)).ucis.length === 2, '시간 초과 뒤에는 둘 수 없음');
+
+// ⑨ 없는 방 코드
 const lost = await newPage();
 await lost.goto(withParams('room=ZZZZZZ'));
 ok(await waitFor(lost, s => s.status === 'error', '없는 방'), '없는 방 코드면 오류 안내');
