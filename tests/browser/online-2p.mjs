@@ -52,6 +52,14 @@ ok(await waitFor(guest, s => s.status === 'connected', '친구 연결') && await
   '링크를 열자 둘 다 "연결됨"');
 ok((await state(host)).myColor === 'w' && (await state(guest)).myColor === 'b', '방장 백, 친구 흑');
 
+// 캐릭터: 처음 값은 허세꾼, 바꾸면 친구 화면에 바로 전해짐 (브라우저에 기억)
+ok((await state(host)).peerChar === 'bluffer' && (await state(guest)).peerChar === 'bluffer', '처음엔 서로 허세꾼으로 보임');
+await host.locator('.online-box select').selectOption({ label: '내 캐릭터: 대가' });
+ok(await waitFor(guest, s => s.peerChar === 'master', '캐릭터 바꾸기'), '방장이 "대가"로 바꾸면 친구 화면에서도 대가');
+await guest.locator('.online-box select').selectOption({ label: '내 캐릭터: 혼돈' });
+ok(await waitFor(host, s => s.peerChar === 'chaos', '친구 캐릭터'), '친구가 "혼돈"으로 바꾸면 방장 화면에서도 혼돈');
+ok((await host.locator('.online-box').textContent()).includes('친구 캐릭터: 혼돈'), '방장 화면에 "친구 캐릭터: 혼돈"');
+
 // ③ 수 주고받기
 await move(guest, 'e7e5');
 ok((await state(guest)).ucis.length === 0, '친구는 방장(백) 차례에 둘 수 없음');
@@ -64,6 +72,8 @@ ok((await info(host)).includes('내 차례') && (await info(guest)).includes('�
 // ④ 친구가 새로고침해도 이어짐
 await guest.reload();
 ok(await waitFor(guest, s => s.status === 'connected' && s.ucis.join() === 'e2e4,e7e5', '재접속'), '친구가 새로고침 → 다시 연결되고 판이 그대로');
+ok((await state(guest)).myChar === 'chaos' && await waitFor(guest, s => s.peerChar === 'master', '재접속 캐릭터')
+  && (await state(host)).peerChar === 'chaos', '새로고침해도 내 캐릭터(혼돈)는 기억, 친구 캐릭터(대가)도 다시 받음');
 
 // ⑤ 끝까지: 스콜라 메이트
 await move(host, 'f1c4'); await waitFor(guest, s => s.ucis.length === 3, '3');

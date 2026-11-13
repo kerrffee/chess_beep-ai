@@ -26,6 +26,9 @@ export interface Opponent {
   dispose(): void;
 }
 
+// 캐릭터가 있는 성격 id (친구와 온라인에서 "내 캐릭터"로 고를 수 있는 것들)
+export const CHARACTER_IDS = ['master', 'coward', 'greedy', 'bluffer', 'excuser', 'attacker', 'random', 'queenlover', 'chaos'];
+
 const HUMANS: Who[] = ['coward', 'greedy', 'bluffer', 'excuser', 'attacker', 'random', 'queenlover'];
 
 // 성격 id → 캐릭터 (없으면 null)

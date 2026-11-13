@@ -20,14 +20,19 @@ export let errorText = '';
 export let gameNo = 0;           // 몇 번째 판인지 (다시 하기마다 +1, 옛 판의 메시지는 버림)
 export let myRematch = false;    // 내가 "다시 하기"를 눌렀는지
 export let peerRematch = false;  // 친구가 "다시 하기"를 눌렀는지
+// 캐릭터: 내가 고른 것(친구 화면 건너편에 앉음) / 친구가 고른 것(내 화면 건너편에 앉음). 성격 id
+// 내 캐릭터는 브라우저에 기억해 둠 (다음에 들어와도 그대로)
+export let myChar = loadMyChar();
+export let peerChar: string | null = null;
 let hostColor: Color = 'w';      // 이번 판에서 방장이 두는 색 (다시 하기마다 바뀜)
 let peer: Peer | null = null;
 let conn: DataConnection | null = null;
 
 // 주고받는 메시지
 type Msg =
-  | { t: 'hi' } // 친구 → 방장: 지금 판 보내 줘
-  | { t: 'hello'; hostColor: Color; gameNo: number; ucis: string[]; resigned: Color | null } // 방장 → 친구: 지금 판 전부
+  | { t: 'hi'; char: string } // 친구 → 방장: 지금 판 보내 줘 (+ 친구 캐릭터)
+  | { t: 'hello'; hostColor: Color; gameNo: number; ucis: string[]; resigned: Color | null; char: string } // 방장 → 친구: 지금 판 전부 (+ 방장 캐릭터)
+  | { t: 'char'; char: string } // 캐릭터를 바꿈 (대국 중에도)
   | { t: 'move'; gameNo: number; ucis: string[] }
   | { t: 'resign'; gameNo: number; color: Color }
   | { t: 'rematch'; gameNo: number };
@@ -138,7 +143,7 @@ export async function join(roomCode: string) {
     c.on('open', () => {
       const ask = () => {
         if (conn !== c || status !== 'joining') return;
-        if (c.open) c.send({ t: 'hi' } satisfies Msg);
+        if (c.open) c.send({ t: 'hi', char: myChar } satisfies Msg);
         setTimeout(ask, 1000);
       };
       ask();
@@ -173,6 +178,7 @@ function fail(text: string) {
 
 // 온라인을 그만둠 (다른 상대를 고르거나 "나가기")
 export function leave() {
+  peerChar = null;
   conn?.close();
   peer?.destroy();
   conn = null;
@@ -188,6 +194,17 @@ function send(m: Msg) {
   if (conn && conn.open) conn.send(m);
 }
 
+// 내 캐릭터 바꾸기: 기억해 두고 친구에게 알림
+export function setMyChar(id: string) {
+  myChar = id;
+  try { localStorage.setItem('chess.myCharacter', id); } catch { /* 저장 못 해도 이번엔 그대로 씀 */ }
+  send({ t: 'char', char: id });
+  changed();
+}
+function loadMyChar(): string {
+  try { return localStorage.getItem('chess.myCharacter') || 'bluffer'; } catch { return 'bluffer'; }
+}
+
 // "나가기"·"취소": 연결을 끊고 처음(방 만들기) 화면으로. 상대는 온라인 그대로
 export function leaveAndRefresh() {
   leave();
@@ -199,12 +216,14 @@ export const myColor = (): Color => (role === 'guest' ? G.otherColor(hostColor) 
 export const canPlay = () => status === 'connected';
 
 function sendHello() {
-  send({ t: 'hello', hostColor, gameNo, ucis: G.moveUcis, resigned: G.resigned });
+  send({ t: 'hello', hostColor, gameNo, ucis: G.moveUcis, resigned: G.resigned, char: myChar });
 }
 
 // ---------- 받기 ----------
 function receive(m: Msg) {
-  if (m.t === 'hi') { if (role === 'host') sendHello(); return; }
+  if ('char' in m) peerChar = m.char; // 친구 캐릭터 (hi·hello·char 모두 실어 보냄)
+  if (m.t === 'char') { changed(); return; }
+  if (m.t === 'hi') { if (role === 'host') { sendHello(); changed(); } return; }
   if (m.t === 'hello') {
     status = 'connected';
     hostColor = m.hostColor;
@@ -255,4 +274,4 @@ G.onlineHooks.canPlay = canPlay;
 G.onlineHooks.leave = () => { leave(); changed(); };
 
 // 테스트용 (브라우저 테스트가 상태를 읽음)
-Object.assign(window, { __online: () => ({ status, role, code, gameNo, myColor: myColor(), ucis: [...G.moveUcis], resigned: G.resigned }) });
+Object.assign(window, { __online: () => ({ status, role, code, gameNo, myColor: myColor(), ucis: [...G.moveUcis], resigned: G.resigned, myChar, peerChar }) });

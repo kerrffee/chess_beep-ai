@@ -9,6 +9,7 @@ import { findPersonality } from './personality';
 import { squareName } from './notation';
 import * as G from './game'; // 게임 진행 담당 (판 상태, 수 두기, AI, 대사 …)
 import * as O from './online'; // 친구와 온라인 1대1 (연결)
+import { CHARACTER_IDS } from './three/opponent';
 
 import { SYMBOLS, drawBoard, drawMoveList, makeButton, makeSelect, scrollMoves } from './view';
 import { downloadText, parsePGN, pgnFilename, sansOf } from './pgn';
@@ -279,10 +280,13 @@ function renderPlay(app: HTMLElement) {
     // 판 건너편 상대: 사람 vs AI일 때만 (AI 쪽 색 = 내 반대 색)
     const aiColor: Color = G.playerColor === 'w' ? 'b' : 'w';
     const mate = gameStatus(G.game, G.history) === 'checkmate';
-    const opponent = watching || G.opponent === 'human' || online ? null : {
-      id: G.opponent, color: aiColor,
+    // 온라인이면 친구가 고른 캐릭터가 친구 색 쪽에 앉음 (친구 수를 둘 때 손을 뻗고, 잡고 잡히면 반응)
+    const oppId = online ? (O.canPlay() || O.status === 'lost' ? O.peerChar : null)
+      : watching || G.opponent === 'human' ? null : G.opponent;
+    const opponent = oppId ? {
+      id: oppId, color: aiColor,
       lost: (mate && G.game.turn === aiColor) || G.resigned === aiColor,
-    };
+    } : null;
     board3D.update({
       game: G.game, lastMove: G.lastMove, selected: G.selected, targets: G.targets, flipped,
       inCheck: inCheck(G.game, G.game.turn), checkmate: mate, opponent,
@@ -447,7 +451,7 @@ function onlineLine(): HTMLElement {
     creating: '방 만드는 중…',
     waiting: `방 코드 ${O.code} — 친구를 기다리는 중`,
     joining: '친구 방에 들어가는 중…',
-    connected: `친구와 연결됨 · 나: ${G.colorName(G.playerColor)}` + (O.peerRematch ? ' · 친구가 다시 하기를 원해요' : ''),
+    connected: `친구(${O.peerChar ? findPersonality(O.peerChar).name : '?'})와 연결됨 · 나: ${G.colorName(G.playerColor)}` + (O.peerRematch ? ' · 친구가 다시 하기를 원해요' : ''),
     lost: '친구와 연결이 끊겼어요',
     error: O.errorText,
   }[O.status];
@@ -482,6 +486,11 @@ function onlineBox(): HTMLElement {
     row(link);
     row(makeButton(copied ? '복사했어요 ✓' : '링크 복사', () => copyLink(link)));
   };
+
+  // 내 캐릭터: 친구 화면 건너편에 앉는 모습. 언제든 바꿀 수 있음 (대국 중에도 친구 화면에 바로 바뀜)
+  row(makeSelect('opponent', CHARACTER_IDS.map(id => ({ value: id, label: '내 캐릭터: ' + findPersonality(id).name })),
+    O.myChar, O.setMyChar));
+  if (O.peerChar && O.status !== 'idle') line(`친구 캐릭터: ${findPersonality(O.peerChar).name}`, 'online-hint');
 
   if (O.status === 'idle' || O.status === 'error') {
     if (O.status === 'error') line(O.errorText, 'online-error');
