@@ -3,7 +3,7 @@ import './style.css';
 import { initialGame, type Color, type GameState, type PieceType } from './board';
 import { makeMove, legalMoves, inCheck, gameStatus, type Move } from './moves';
 import type { Board3D, CameraView } from './three/board3d';
-import { playMoveSound, unlockAudio } from './sound';
+import { playMoveSound, playTurnChime, unlockAudio } from './sound';
 import { reloadForNewVersion, isMissingChunk } from './reload';
 import { findPersonality } from './personality';
 import { squareName } from './notation';
@@ -111,7 +111,63 @@ function soundForNewMoves() {
     if (use3D && board3D) setTimeout(() => playMoveSound(san), board3D.moveLandsIn()); // 기물이 내려앉는 순간
     else playMoveSound(san);
   }
+  // 친구와 온라인: 다른 탭·창을 보는 중에 친구가 두면 "띵-동" + 탭 제목 깜빡임
+  if (count > heardMoves && G.opponent === 'online' && O.canPlay() && G.game.turn === G.playerColor && document.hidden) {
+    if (soundOn) playTurnChime();
+    flashTitle();
+  }
   heardMoves = count; // 무르기로 줄어들면 그대로 따라감
+}
+
+// 탭 제목 깜빡이기: 이 탭으로 돌아오면 멈춤
+const baseTitle = document.title;
+let titleTimer: number | null = null;
+function flashTitle() {
+  if (titleTimer !== null) return;
+  let on = false;
+  titleTimer = window.setInterval(() => {
+    on = !on;
+    document.title = on ? '♟ 내 차례!' : baseTitle;
+  }, 1000);
+  document.title = '♟ 내 차례!';
+}
+function stopFlash() {
+  if (titleTimer !== null) { clearInterval(titleTimer); titleTimer = null; }
+  document.title = baseTitle;
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden) stopFlash(); });
+
+// ---------- 친구와 온라인: 감정표현 ----------
+let emoteShown: { who: string; text: string; until: number } | null = null; // 지금 띄운 감정표현 말풍선
+let seenPeerEmote = 0; // 마지막으로 보여 준 친구 감정표현 번호
+function showEmote(who: string, text: string) {
+  emoteShown = { who, text, until: Date.now() + 3000 };
+  setTimeout(() => { if (emoteShown && Date.now() >= emoteShown.until) { emoteShown = null; render(); } }, 3050);
+}
+function sendEmote(id: string) {
+  const e = O.EMOTES.find(x => x.id === id)!;
+  if (O.sendEmote(id)) { showEmote('나', `${e.icon} ${e.text}`); render(); }
+}
+// 친구가 보낸 감정표현이 새로 왔으면 말풍선 + 내 화면 건너편 친구 캐릭터가 반응
+function checkPeerEmote() {
+  const pe = O.peerEmote;
+  if (!pe || pe.n === seenPeerEmote) return;
+  seenPeerEmote = pe.n;
+  const e = O.EMOTES.find(x => x.id === pe.id)!;
+  const name = O.peerChar ? findPersonality(O.peerChar).name : '친구';
+  showEmote(`친구(${name})`, `${e.icon} ${e.text}`);
+  if (e.anim && use3D && board3D) board3D.emote(e.anim);
+}
+function emoteBar(): HTMLElement {
+  const bar = document.createElement('div');
+  bar.className = 'emote-bar';
+  for (const e of O.EMOTES) {
+    const b = makeButton(e.icon, () => sendEmote(e.id), false, 'emote-btn');
+    b.title = e.text;
+    b.dataset.emote = e.id;
+    bar.appendChild(b);
+  }
+  return bar;
 }
 
 function toggle3D() {
@@ -261,7 +317,19 @@ function renderPlay(app: HTMLElement) {
 
   // AI의 말풍선 (사람끼리 둘 때는 없음). 비어 있어도 자리를 지켜서 판이 들썩이지 않게
   let bubble: HTMLElement | null = null;
-  if (G.opponent !== 'human' && !online) {
+  if (online) {
+    checkPeerEmote();
+    if (emoteShown && Date.now() < emoteShown.until) {
+      bubble = document.createElement('div');
+      bubble.className = 'speech emote-speech';
+      const who = document.createElement('span');
+      who.className = 'speaker';
+      who.textContent = emoteShown.who;
+      const words = document.createElement('span');
+      words.textContent = emoteShown.text;
+      bubble.append(who, words);
+    }
+  } else if (G.opponent !== 'human') {
     bubble = document.createElement('div');
     bubble.className = 'speech' + (G.speech ? '' : ' empty');
     const who = document.createElement('span');
@@ -386,6 +454,7 @@ function renderPlay(app: HTMLElement) {
     if (online) hud.appendChild(onlineLine());
     if (bubble) hud.appendChild(bubble);
     app.appendChild(hud);
+    if (online && O.canPlay()) app.appendChild(emoteBar());
 
     const toggle = makeButton(panelOpen ? '✕' : '⚙ 설정', () => { panelOpen = !panelOpen; render(); }, false, 'panel-toggle');
     app.appendChild(toggle);
@@ -408,7 +477,9 @@ function renderPlay(app: HTMLElement) {
     const middle = document.createElement('div');
     middle.className = 'middle';
     middle.append(boardEl, side);
-    app.append(middle, buttons, viewRow);
+    app.append(middle, buttons);
+    if (online && O.canPlay()) app.appendChild(emoteBar());
+    app.append(viewRow);
     if (err) app.appendChild(err);
   }
 
@@ -491,6 +562,9 @@ function onlineBox(): HTMLElement {
   row(makeSelect('opponent', CHARACTER_IDS.map(id => ({ value: id, label: '내 캐릭터: ' + findPersonality(id).name })),
     O.myChar, O.setMyChar));
   if (O.peerChar && O.status !== 'idle') line(`친구 캐릭터: ${findPersonality(O.peerChar).name}`, 'online-hint');
+  // TURN(turnConfig.ts)을 넣었을 때만: 잘 받았는지
+  if (O.status !== 'idle' && O.turnState === 'on') line('TURN 켜짐: 학교 와이파이·휴대폰 데이터에서도 연결돼요', 'online-hint');
+  if (O.turnState === 'failed') line('TURN 서버 정보를 못 받아서 직접 연결만 시도해요', 'online-error');
 
   if (O.status === 'idle' || O.status === 'error') {
     if (O.status === 'error') line(O.errorText, 'online-error');

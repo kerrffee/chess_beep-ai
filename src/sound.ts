@@ -71,5 +71,11 @@ export function playMoveSound(san: string) {
   if (san.endsWith('+')) tone(880, 0.35, 0.12);
 }
 
+// 친구와 온라인: 다른 탭을 보고 있을 때 친구가 두면 "띵-동" (내 차례 알림)
+export function playTurnChime() {
+  tone(660, 0.25, 0.15);
+  setTimeout(() => tone(990, 0.4, 0.15), 180);
+}
+
 // 첫 클릭 때 소리 장치를 깨워 둠 (그래야 AI가 둘 때도 소리가 남)
 export function unlockAudio() { audio(); }

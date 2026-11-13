@@ -506,3 +506,30 @@ body.full3d .tab { padding: 6px 12px; font-size: 13px; }
 .online-hint { color: #aaa; font-size: 12px; }
 .online-ok { color: #8fd18f; }
 .online-error { color: #f09a8a; }
+
+/* 친구와 온라인: 감정표현 버튼 (3D면 아래 가운데에 떠 있음, 휴대폰은 오른쪽 아래) */
+.emote-bar {
+  display: flex;
+  gap: 6px;
+  justify-content: center;
+}
+.emote-btn {
+  font-size: 20px;
+  line-height: 1;
+  padding: 6px 8px;
+  border: none;
+  border-radius: 8px;
+  background: rgba(30, 30, 30, 0.7);
+  cursor: pointer;
+}
+.emote-btn:hover { background: rgba(70, 70, 70, 0.85); }
+body.full3d .emote-bar {
+  position: fixed;
+  bottom: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2;
+}
+@media (max-width: 760px) {
+  body.full3d .emote-bar { left: auto; right: 10px; transform: none; }
+}

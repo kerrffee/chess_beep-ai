@@ -10,6 +10,7 @@ import type Peer from 'peerjs';
 import type { DataConnection } from 'peerjs';
 import type { Color } from './board';
 import * as G from './game';
+import { TURN_CREDENTIALS_URL } from './turnConfig';
 
 export type OnlineStatus = 'idle' | 'creating' | 'waiting' | 'joining' | 'connected' | 'lost' | 'error';
 
@@ -35,7 +36,20 @@ type Msg =
   | { t: 'char'; char: string } // 캐릭터를 바꿈 (대국 중에도)
   | { t: 'move'; gameNo: number; ucis: string[] }
   | { t: 'resign'; gameNo: number; color: Color }
-  | { t: 'rematch'; gameNo: number };
+  | { t: 'rematch'; gameNo: number }
+  | { t: 'emote'; id: string }; // 감정표현 (EMOTES의 id)
+
+// 감정표현: 버튼을 누르면 친구 화면에 말풍선이 뜨고, 친구 화면 건너편에 앉은 내 캐릭터가 반응함
+// anim: 'captured' = 신난 반응(잡았을 때 동작), 'lostPiece' = 움찔 반응(잡혔을 때 동작), null = 말풍선만
+export const EMOTES: { id: string; icon: string; text: string; anim: 'captured' | 'lostPiece' | null }[] = [
+  { id: 'nice', icon: '👍', text: '잘 뒀다!', anim: 'captured' },
+  { id: 'haha', icon: '😆', text: '하하!', anim: 'captured' },
+  { id: 'oops', icon: '😱', text: '으악!', anim: 'lostPiece' },
+  { id: 'hmm', icon: '🤔', text: '음…', anim: null },
+];
+export let peerEmote: { id: string; n: number } | null = null; // 친구가 마지막으로 보낸 감정표현 (n은 몇 번째인지)
+let emoteCount = 0;
+let lastEmoteSent = 0;
 
 // PeerJS 아이디 = 앞말 + 코드. 앞말은 다른 사이트의 방과 겹치지 않게
 const PREFIX = 'chess-beep-ai-';
@@ -51,18 +65,50 @@ export function cleanCode(text: string): string {
 }
 
 // 테스트용: 주소에 ?peerserver=localhost:9000 을 붙이면 공개 서버 대신 그 중계 서버를 씀
-function peerOptions() {
+// TURN(turnConfig.ts)을 넣었으면 연결 방법 목록(iceServers)에 더함
+async function peerOptions() {
   const custom = new URLSearchParams(location.search).get('peerserver');
-  if (!custom) return {};
+  const iceServers = await turnServers();
+  const opts: Record<string, unknown> = iceServers ? { config: { iceServers } } : {};
+  if (!custom) return opts;
   const [host, port] = custom.split(':');
-  return { host, port: Number(port) || 9000, path: '/', secure: false };
+  return { ...opts, host, port: Number(port) || 9000, path: '/', secure: false };
+}
+
+// TURN 서버 목록을 한 번만 받아 둠 (못 받으면 TURN 없이: 직접 연결만)
+let turnPromise: Promise<RTCIceServer[] | null> | null = null;
+export let turnState: 'off' | 'on' | 'failed' = 'off'; // 화면에 짧게 표시
+function turnServers(): Promise<RTCIceServer[] | null> {
+  if (!TURN_CREDENTIALS_URL) return Promise.resolve(null);
+  if (!turnPromise) {
+    turnPromise = (async () => {
+      try {
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 4000); // 4초 넘게 걸리면 포기
+        const res = await fetch(TURN_CREDENTIALS_URL, { signal: ctrl.signal });
+        clearTimeout(timer);
+        if (!res.ok) throw new Error(String(res.status));
+        const list = await res.json() as RTCIceServer[];
+        if (!Array.isArray(list) || list.length === 0) throw new Error('빈 목록');
+        turnState = 'on';
+        // 구글 STUN도 같이 (내 공개 주소 알아내기용, PeerJS 기본값에 있던 것)
+        return [{ urls: 'stun:stun.l.google.com:19302' }, ...list];
+      } catch (e) {
+        console.warn('TURN 서버 정보를 못 받아서 TURN 없이 연결해요:', e);
+        turnState = 'failed';
+        turnPromise = null; // 다음 연결 때 다시 시도
+        return null;
+      }
+    })();
+  }
+  return turnPromise;
 }
 
 function changed() { G.onlineChanged(); }
 
 async function newPeer(id: string): Promise<Peer> {
   const { default: PeerClass } = await import('peerjs');
-  return new PeerClass(id, peerOptions());
+  return new PeerClass(id, await peerOptions());
 }
 
 // 친구에게 보낼 초대 링크
@@ -179,6 +225,7 @@ function fail(text: string) {
 // 온라인을 그만둠 (다른 상대를 고르거나 "나가기")
 export function leave() {
   peerChar = null;
+  peerEmote = null;
   conn?.close();
   peer?.destroy();
   conn = null;
@@ -223,6 +270,10 @@ function sendHello() {
 function receive(m: Msg) {
   if ('char' in m) peerChar = m.char; // 친구 캐릭터 (hi·hello·char 모두 실어 보냄)
   if (m.t === 'char') { changed(); return; }
+  if (m.t === 'emote') {
+    if (EMOTES.some(e => e.id === m.id)) { peerEmote = { id: m.id, n: ++emoteCount }; changed(); }
+    return;
+  }
   if (m.t === 'hi') { if (role === 'host') { sendHello(); changed(); } return; }
   if (m.t === 'hello') {
     status = 'connected';
@@ -250,6 +301,14 @@ export function resign() {
   G.setOnlineResigned(myColor());
   send({ t: 'resign', gameNo, color: myColor() });
   changed();
+}
+
+// 감정표현 보내기. 너무 자주 누르면(1.5초 안) 무시. 보냈으면 true
+export function sendEmote(id: string): boolean {
+  if (!canPlay() || Date.now() - lastEmoteSent < 1500) return false;
+  lastEmoteSent = Date.now();
+  send({ t: 'emote', id });
+  return true;
 }
 
 // 다시 하기: 둘 다 누르면 색을 바꿔서 새 판 (둘이 같은 규칙으로 계산해서 따로 정해도 똑같이 됨)

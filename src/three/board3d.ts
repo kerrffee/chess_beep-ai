@@ -43,6 +43,7 @@ export interface Board3D {
   moveLandsIn(): number; // 마지막 수의 기물이 내려앉기까지 남은 시간(ms). 효과음을 그때 맞춰 냄
   // 오른쪽이 설정 판에 가려지는 폭(px). 판을 남은 자리 가운데로 옮기고, 넘치면 조금 멀리서 봄. 0이면 원래대로
   setRightInset(px: number): void;
+  emote(anim: 'captured' | 'lostPiece'): void; // 건너편 캐릭터가 바로 반응 (친구와 온라인의 감정표현)
   dispose(): void;
   renderCount(): number; // 테스트용: 지금까지 그린 횟수 (가만히 있을 때 안 늘어나야 함)
 }
@@ -475,7 +476,34 @@ export async function createBoard3D(onSquareClick: (index: number) => void, them
       controls.target.set(0, 2.2, -2.5 * side);
     }
     camera.up.set(0, 1, 0);
+    if (portrait) fitPortrait();
     controls.update();
+  }
+
+  // 휴대폰 세로 화면: 가로 폭이 좁아서 판이 멀고 작게 보임 → 카메라를 보는 방향 그대로 판 쪽으로 당겨서
+  // 판(기물 높이까지)이 화면 너비의 약 92%를 채우게 함. 위아래로 넘치지 않게 세로도 같이 봄
+  // 더 멀어지게는 안 함(이미 크면 그대로). 사람이 손가락으로 확대·회전한 건 시점을 다시 고르거나 화면을 돌릴 때만 초기화
+  let portrait = false;
+  function fitPortrait() {
+    const corners: THREE.Vector3[] = [];
+    for (const x of [-4.3, 4.3]) for (const z of [-4.3, 4.3]) for (const y of [0, 1.2]) corners.push(new THREE.Vector3(x, y, z));
+    const target = controls.target;
+    const far = camera.position.distanceTo(target); // 처음 거리보다 멀어지지는 않음
+    for (let i = 0; i < 8; i++) { // 원근 때문에 한 번에 딱 맞지 않아서(가까이 가면 앞쪽이 더 커짐) 몇 번 되풀이
+      camera.lookAt(target);
+      camera.updateMatrixWorld();
+      let mx = 0, my = 0;
+      for (const c of corners) {
+        const p = c.clone().project(camera);
+        mx = Math.max(mx, Math.abs(p.x));
+        my = Math.max(my, Math.abs(p.y));
+      }
+      let scale = Math.max(mx / 0.92, my / 0.85);
+      const d = camera.position.distanceTo(target);
+      if (d * scale > far) scale = far / d;
+      if (Math.abs(scale - 1) < 0.02) break; // 거의 맞음
+      camera.position.sub(target).multiplyScalar(scale).add(target);
+    }
   }
   placeCamera();
 
@@ -517,9 +545,13 @@ export async function createBoard3D(onSquareClick: (index: number) => void, them
     if (inset > 0) camera.setViewOffset(w, h, inset / 2, 0, w, h);
     else camera.clearViewOffset();
     camera.updateProjectionMatrix();
+    // 세로·가로가 바뀌면(처음 열 때, 휴대폰을 돌릴 때) 카메라를 다시 놓음 (세로면 판 쪽으로 당김)
+    const nowPortrait = free < h * 0.9;
+    if (nowPortrait !== portrait || !placedOnce) { portrait = nowPortrait; placedOnce = true; placeCamera(); }
     resizeComposer();
     requestRender();
   };
+  let placedOnce = false;
   const observer = new ResizeObserver(resize);
   observer.observe(element);
 
@@ -629,6 +661,7 @@ export async function createBoard3D(onSquareClick: (index: number) => void, them
     moveLandsIn: () => Math.max(0, landingAt - performance.now()),
     // 화면을 다시 그리는 동안엔 이 상자가 잠깐 떨어져 있어서(너비 0) 바로 맞추면 무시됨 → 다음 화면 갱신 때 맞춤
     setRightInset(px) { if (px !== rightInset) { rightInset = px; requestAnimationFrame(resize); } },
+    emote(anim) { opp?.react?.(anim, 0); requestRender(); },
     renderCount: () => renders,
     dispose() {
       setOpponent('');

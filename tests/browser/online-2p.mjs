@@ -75,8 +75,28 @@ ok(await waitFor(guest, s => s.status === 'connected' && s.ucis.join() === 'e2e4
 ok((await state(guest)).myChar === 'chaos' && await waitFor(guest, s => s.peerChar === 'master', '재접속 캐릭터')
   && (await state(host)).peerChar === 'chaos', '새로고침해도 내 캐릭터(혼돈)는 기억, 친구 캐릭터(대가)도 다시 받음');
 
+// 감정표현: 버튼을 누르면 친구 화면에 말풍선, 너무 빨리 또 누르면 무시
+await host.click('.emote-btn[data-emote="nice"]');
+await guest.waitForTimeout(800);
+const bubbleText = await guest.locator('.emote-speech').textContent().catch(() => '');
+ok(bubbleText.includes('대가') && bubbleText.includes('잘 뒀다'), `감정표현 👍 → 친구 화면 말풍선: "${bubbleText}"`);
+ok((await host.locator('.emote-speech').textContent()).includes('나'), '보낸 쪽 화면에도 "나: 👍 잘 뒀다!"');
+await host.click('.emote-btn[data-emote="haha"]'); // 1.5초 안에 또 누름 → 안 보냄
+await guest.waitForTimeout(500);
+ok((await guest.locator('.emote-speech').textContent()).includes('잘 뒀다'), '1.5초 안에 다시 누르면 무시');
+await guest.waitForTimeout(3000);
+ok(await guest.locator('.emote-speech').count() === 0, '말풍선은 3초 뒤 사라짐');
+
+// 내 차례 알림: 친구가 다른 탭을 보는 중에 방장이 두면 친구 탭 제목이 깜빡임, 돌아오면 원래대로
+const realTitle = await guest.title();
+await guest.evaluate(() => Object.defineProperty(document, 'hidden', { get: () => true, configurable: true }));
+
 // ⑤ 끝까지: 스콜라 메이트
 await move(host, 'f1c4'); await waitFor(guest, s => s.ucis.length === 3, '3');
+await guest.waitForTimeout(300);
+ok((await guest.title()) === '♟ 내 차례!', `다른 탭일 때 친구 수가 오면 탭 제목: "${await guest.title()}"`);
+await guest.evaluate(() => { Object.defineProperty(document, 'hidden', { get: () => false, configurable: true }); document.dispatchEvent(new Event('visibilitychange')); });
+ok((await guest.title()) === realTitle, '탭으로 돌아오면 제목이 원래대로');
 await move(guest, 'b8c6'); await waitFor(host, s => s.ucis.length === 4, '4');
 await move(host, 'd1h5'); await waitFor(guest, s => s.ucis.length === 5, '5');
 await move(guest, 'g8f6'); await waitFor(host, s => s.ucis.length === 6, '6');
